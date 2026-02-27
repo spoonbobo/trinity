@@ -1,0 +1,12 @@
+FROM node:22-bookworm
+
+RUN corepack enable && npm install -g openclaw@latest
+
+RUN mkdir -p /home/node/.openclaw && chown -R node:node /home/node/.openclaw
+
+USER node
+WORKDIR /home/node
+
+EXPOSE 18789
+
+CMD ["openclaw", "gateway", "--port", "18789", "--allow-unconfigured"]

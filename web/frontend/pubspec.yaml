@@ -1,0 +1,33 @@
+name: trinity_shell
+description: Trinity AGI Universal Command Center - A blank canvas shell powered by OpenClaw.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.2.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  web_socket_channel: ^3.0.1
+  speech_to_text: ^7.0.0
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+  uuid: ^4.5.1
+  json_annotation: ^4.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  build_runner: ^2.4.13
+  json_serializable: ^6.8.0
+
+flutter:
+  uses-material-design: true
+  fonts:
+    - family: SpaceMono
+      fonts:
+        - asset: fonts/SpaceMono-Regular.ttf
+        - asset: fonts/SpaceMono-Bold.ttf
+          weight: 700

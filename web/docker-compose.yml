@@ -1,0 +1,60 @@
+version: "3.9"
+
+services:
+  openclaw-gateway:
+    image: openclaw:local
+    build:
+      context: .
+      dockerfile: Dockerfile.openclaw
+    container_name: trinity-openclaw
+    restart: unless-stopped
+    ports:
+      - "18789:18789"
+    volumes:
+      - openclaw-data:/home/node/.openclaw
+      - ./openclaw.json:/home/node/.openclaw/openclaw.json:ro
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+    healthcheck:
+      test: ["CMD", "openclaw", "health", "--token", "${OPENCLAW_GATEWAY_TOKEN}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - trinity
+
+  frontend-builder:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: trinity-flutter-builder
+    volumes:
+      - flutter-build:/output
+    profiles:
+      - build
+
+  nginx:
+    image: nginx:alpine
+    container_name: trinity-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - flutter-build:/usr/share/nginx/html:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      openclaw-gateway:
+        condition: service_healthy
+    networks:
+      - trinity
+
+volumes:
+  openclaw-data:
+  flutter-build:
+
+networks:
+  trinity:
+    driver: bridge
