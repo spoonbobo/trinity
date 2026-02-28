@@ -190,8 +190,8 @@ Roles are stored in `rbac.roles` with a self-referential `parent_id`. Inheritanc
 
 | Tier | Min Role | Commands |
 |------|----------|----------|
-| safe | guest | status, health, models, skills list [--json], crons list [--json], cron list [--json], cat MEMORY.md |
-| standard | user | doctor, skills, cron, clawhub, sessions, logs, channels, tools, memory, config get, config validate |
+| safe | guest | status, health, models, skills list [--json], crons list [--json], cron list [--json], hooks list [--json], hooks check [--json], cat MEMORY.md |
+| standard | user | doctor, skills, cron, hooks, hooks enable, hooks disable, hooks info, clawhub, sessions, logs, channels, tools, memory, message poll, config get, config validate |
 | privileged | admin | doctor --fix, configure, onboard, dashboard, config set |
 
 Command matching uses a most-specific-prefix algorithm: `doctor --fix` is privileged even though `doctor` is standard because the longer match takes precedence.
@@ -277,7 +277,7 @@ MaterialApp (TrinityApp)
   AuthGuard
     LoginPage (if no token)
     ShellPage (if authenticated)
-      StatusBar: [dot] memory --- setup skills crons [admin] settings
+      StatusBar: [dot] memory --- setup skills automations [admin] settings
       Row:
         ChatStreamView (flex:6)
         A2UIRendererPanel (flex:4)
@@ -307,7 +307,8 @@ MaterialApp (TrinityApp)
 | Governance (approvals) | governance/approval_panel.dart | Auto on approval events |
 | Prompt bar + voice | prompt_bar/prompt_bar.dart | Always visible |
 | Setup wizard | onboarding/onboarding_wizard.dart | Status bar "setup" |
-| Skills + Crons | catalog/skills_cron_dialog.dart | Status bar "skills"/"crons" |
+| Skills | catalog/skills_cron_dialog.dart | Status bar "skills" |
+| Automations | automations/automations_dialog.dart | Status bar "automations" |
 | Memory viewer | memory/memory_dialog.dart | Status bar "memory" |
 | Settings | settings/settings_dialog.dart | Status bar "settings" |
 | Admin panel | admin/admin_dialog.dart | Status bar "admin" (admin+ only) |
@@ -435,10 +436,11 @@ Then hard-refresh browser: Ctrl+Shift+R.
 
 ## Current UI Conventions (2026)
 
-- Status bar: tiny text toggles (memory | setup | skills | crons | admin | settings) with minimal chrome
+- Status bar: tiny text toggles (memory | setup | skills | automations | admin | settings) with minimal chrome
 - Empty states use small centered icons instead of labels where possible
 - Setup wizard: welcome, status, configure, terminal (no catalog step)
-- Skills/Crons: opened from status bar as separate toggles, grouped in shared dialog
+- Skills: standalone dialog opened from status bar "skills" toggle
+- Automations: standalone dialog with 4 sub-tabs (crons, hooks, webhooks, polls) opened from status bar "automations" toggle
 - Skills view: grouped by ready, not ready, clawhub, templates
 - Admin panel: 5 tabs (users, audit, health, rbac, sessions), visible only to admin/superadmin
 - All dialogs: zero border-radius, 0.5px borders, monospace font

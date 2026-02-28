@@ -1,9 +1,13 @@
+import 'dart:html' as html;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme.dart';
 import '../../core/auth_client.dart';
 import '../../core/toast_provider.dart';
 import '../../main.dart' show authClientProvider;
+
+const _rememberEmailKey = 'trinity_remember_email';
+const _savedEmailKey = 'trinity_saved_email';
 
 class LoginPage extends ConsumerStatefulWidget {
   final VoidCallback? onLoginSuccess;
@@ -19,6 +23,18 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final _passwordController = TextEditingController();
   bool _isLogin = true; // true=login, false=signup
   bool _loading = false;
+  bool _rememberEmail = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final stored = html.window.localStorage[_rememberEmailKey];
+    if (stored == 'true') {
+      _rememberEmail = true;
+      final savedEmail = html.window.localStorage[_savedEmailKey] ?? '';
+      _emailController.text = savedEmail;
+    }
+  }
 
   @override
   void dispose() {
@@ -41,6 +57,16 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       } else {
         await authClient.signUpWithEmail(email, password);
       }
+
+      // Persist or clear remembered email
+      if (_rememberEmail) {
+        html.window.localStorage[_savedEmailKey] = email;
+        html.window.localStorage[_rememberEmailKey] = 'true';
+      } else {
+        html.window.localStorage.remove(_savedEmailKey);
+        html.window.localStorage.remove(_rememberEmailKey);
+      }
+
       widget.onLoginSuccess?.call();
     } catch (e) {
       final errMsg = e.toString().replaceAll('Exception: ', '');
@@ -92,6 +118,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               // Email
               TextField(
                 controller: _emailController,
+                autofocus: !_rememberEmail,
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
+                autofillHints: const [AutofillHints.email],
                 style: theme.textTheme.bodyLarge,
                 decoration: InputDecoration(
                   hintText: 'email',
@@ -107,7 +137,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               // Password
               TextField(
                 controller: _passwordController,
+                autofocus: _rememberEmail,
                 obscureText: true,
+                textInputAction: TextInputAction.done,
+                autofillHints: const [AutofillHints.password],
                 style: theme.textTheme.bodyLarge,
                 decoration: InputDecoration(
                   hintText: 'password',
@@ -119,6 +152,34 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   ),
                 ),
                 onSubmitted: (_) => _submitEmail(),
+              ),
+              const SizedBox(height: 12),
+              // Remember email
+              GestureDetector(
+                onTap: () => setState(() => _rememberEmail = !_rememberEmail),
+                behavior: HitTestBehavior.opaque,
+                child: Row(
+                  children: [
+                    Container(
+                      width: 14,
+                      height: 14,
+                      decoration: BoxDecoration(
+                        color: _rememberEmail ? t.accentPrimary : Colors.transparent,
+                        border: Border.all(
+                          color: _rememberEmail ? t.accentPrimary : t.border,
+                          width: 0.5,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'remember email',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: t.fgMuted,
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 16),
               // Actions

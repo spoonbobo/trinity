@@ -33,6 +33,14 @@ class TerminalProxyClient extends ChangeNotifier {
   bool _isAuthenticated = false;
   bool _isExecuting = false;
 
+  /// Completer that resolves when auth succeeds (or fails/times out).
+  Completer<void>? _authCompleter;
+
+  /// Command queue: each entry is a Future that completes when the previous
+  /// command finishes. This ensures only one command runs at a time even when
+  /// multiple callers invoke executeCommandForOutput concurrently.
+  Future<void> _execQueue = Future.value();
+
   TerminalConnectionState get state => _state;
   List<TerminalOutput> get outputs => List.unmodifiable(_outputs);
   bool get isAuthenticated => _isAuthenticated;
@@ -50,11 +58,19 @@ class TerminalProxyClient extends ChangeNotifier {
     _role = role;
   }
 
+  /// Connect to the terminal proxy and wait for authentication to complete.
+  /// Returns when authenticated, or throws on auth failure / timeout.
   Future<void> connect() async {
-    if (_state == TerminalConnectionState.connected ||
-        _state == TerminalConnectionState.connecting) return;
+    // Already connected and authed -- nothing to do.
+    if (_state == TerminalConnectionState.connected && _isAuthenticated) return;
+
+    // If already connecting, wait for the in-flight auth to finish.
+    if (_state == TerminalConnectionState.connecting && _authCompleter != null) {
+      return _authCompleter!.future;
+    }
 
     _state = TerminalConnectionState.connecting;
+    _authCompleter = Completer<void>();
     notifyListeners();
 
     try {
@@ -66,9 +82,22 @@ class TerminalProxyClient extends ChangeNotifier {
         onDone: _onDone,
       );
 
-      // Wait a moment then authenticate
+      // Small delay for the WebSocket handshake to finish, then send auth.
       await Future.delayed(const Duration(milliseconds: 100));
       _authenticate();
+
+      // Wait for the auth response (resolved in _onMessage 'auth' case).
+      // Timeout after 10 seconds so callers don't hang forever.
+      await _authCompleter!.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          if (!_authCompleter!.isCompleted) {
+            _authCompleter!.completeError(
+              TimeoutException('Terminal proxy auth timed out'),
+            );
+          }
+        },
+      );
     } catch (e) {
       _state = TerminalConnectionState.error;
       notifyListeners();
@@ -94,8 +123,16 @@ class TerminalProxyClient extends ChangeNotifier {
           _isAuthenticated = data['status'] == 'ok';
           if (_isAuthenticated) {
             _state = TerminalConnectionState.connected;
+            if (_authCompleter != null && !_authCompleter!.isCompleted) {
+              _authCompleter!.complete();
+            }
           } else {
             _state = TerminalConnectionState.error;
+            if (_authCompleter != null && !_authCompleter!.isCompleted) {
+              _authCompleter!.completeError(
+                StateError('Terminal proxy auth failed'),
+              );
+            }
           }
           notifyListeners();
           break;
@@ -158,12 +195,20 @@ class TerminalProxyClient extends ChangeNotifier {
       type: 'error',
       message: 'Connection error: $error',
     ));
+    if (_authCompleter != null && !_authCompleter!.isCompleted) {
+      _authCompleter!.completeError(error);
+    }
     notifyListeners();
   }
 
   void _onDone() {
     _state = TerminalConnectionState.disconnected;
     _isAuthenticated = false;
+    if (_authCompleter != null && !_authCompleter!.isCompleted) {
+      _authCompleter!.completeError(
+        StateError('Terminal proxy connection closed before auth'),
+      );
+    }
     notifyListeners();
   }
 
@@ -185,13 +230,41 @@ class TerminalProxyClient extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Execute a command and return its collected stdout as a string.
+  ///
+  /// Commands are queued: if multiple callers invoke this concurrently, each
+  /// command waits for the previous one to finish before starting. This
+  /// prevents output interleaving on the single WebSocket connection.
   Future<String> executeCommandForOutput(
+    String command, {
+    Duration timeout = const Duration(seconds: 30),
+  }) {
+    // Chain onto the queue so only one command runs at a time.
+    final previous = _execQueue;
+    final completer = Completer<String>();
+    _execQueue = completer.future.catchError((_) {});
+    // ignore errors in the queue chain so a failed command doesn't block the next
+
+    previous.then((_) {
+      _executeCommandSingle(command, timeout: timeout).then(
+        (result) { if (!completer.isCompleted) completer.complete(result); },
+        onError: (e) { if (!completer.isCompleted) completer.completeError(e); },
+      );
+    });
+
+    return completer.future;
+  }
+
+  /// Internal: run a single command after the queue has released.
+  Future<String> _executeCommandSingle(
     String command, {
     Duration timeout = const Duration(seconds: 30),
   }) async {
     if (!_isAuthenticated || _channel == null) {
       throw StateError('Not connected to terminal proxy');
     }
+
+    // If somehow still executing (e.g. stale state), wait for it to clear.
     if (_isExecuting) {
       final waitCompleter = Completer<void>();
       Timer? waitTimer;
@@ -218,11 +291,11 @@ class TerminalProxyClient extends ChangeNotifier {
     }
 
     final startIndex = _outputs.length;
-    final completer = Completer<String>();
+    final resultCompleter = Completer<String>();
     Timer? timer;
 
     void finish() {
-      if (completer.isCompleted) return;
+      if (resultCompleter.isCompleted) return;
       final slice = _outputs.sublist(startIndex);
       final buffer = StringBuffer();
       for (final out in slice) {
@@ -230,7 +303,7 @@ class TerminalProxyClient extends ChangeNotifier {
         if (text == null || text.isEmpty) continue;
         buffer.writeln(text);
       }
-      completer.complete(buffer.toString());
+      resultCompleter.complete(buffer.toString());
     }
 
     void listener() {
@@ -244,15 +317,15 @@ class TerminalProxyClient extends ChangeNotifier {
     addListener(listener);
     timer = Timer(timeout, () {
       removeListener(listener);
-      if (!completer.isCompleted) {
-        completer.completeError(
+      if (!resultCompleter.isCompleted) {
+        resultCompleter.completeError(
           TimeoutException('Command timed out: $command', timeout),
         );
       }
     });
 
     executeCommand(command);
-    return completer.future;
+    return resultCompleter.future;
   }
 
   void cancelCommand() {
@@ -273,6 +346,12 @@ class TerminalProxyClient extends ChangeNotifier {
     _state = TerminalConnectionState.disconnected;
     _isAuthenticated = false;
     _isExecuting = false;
+    if (_authCompleter != null && !_authCompleter!.isCompleted) {
+      _authCompleter!.completeError(
+        StateError('Terminal proxy disconnected'),
+      );
+    }
+    _authCompleter = null;
     notifyListeners();
   }
 

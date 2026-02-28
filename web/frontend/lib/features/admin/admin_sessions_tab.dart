@@ -33,7 +33,6 @@ class _AdminSessionsTabState extends ConsumerState<AdminSessionsTab> {
       try {
         await client.connect();
       } catch (_) {}
-      await Future.delayed(const Duration(milliseconds: 400));
     }
 
     if (!client.isAuthenticated) {

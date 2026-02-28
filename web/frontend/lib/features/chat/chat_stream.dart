@@ -414,10 +414,20 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.terminal_rounded, size: 20, color: t.fgPlaceholder),
-            const SizedBox(height: 6),
-            Text('type a message to begin',
-              style: TextStyle(fontSize: 10, color: t.fgPlaceholder, letterSpacing: 1)),
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                border: Border.all(color: t.border, width: 0.5),
+              ),
+              child: Icon(Icons.chat_outlined, size: 16, color: t.fgMuted),
+            ),
+            const SizedBox(height: 10),
+            Text('start a conversation',
+              style: TextStyle(fontSize: 11, color: t.fgMuted, letterSpacing: 0.5)),
+            const SizedBox(height: 4),
+            Text('type a message below',
+              style: TextStyle(fontSize: 10, color: t.fgPlaceholder)),
           ],
         ),
       );
@@ -428,13 +438,16 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
       children: [
         ListView.builder(
           controller: _scrollController,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           itemCount: _entries.length + (_agentThinking ? 1 : 0),
           itemBuilder: (context, index) {
             if (index == _entries.length && _agentThinking) {
               return _buildThinkingIndicator(theme);
             }
-            return _buildEntry(_entries[index], theme);
+            final entry = _entries[index];
+            final prev = index > 0 ? _entries[index - 1] : null;
+            final isNewSender = prev == null || prev.role != entry.role;
+            return _buildEntry(entry, theme, isNewSender: isNewSender);
           },
         ),
         if (_showScrollToBottom)
@@ -465,12 +478,12 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
     );
   }
 
-  Widget _buildEntry(ChatEntry entry, ThemeData theme) {
+  Widget _buildEntry(ChatEntry entry, ThemeData theme, {bool isNewSender = true}) {
     switch (entry.role) {
       case 'user':
-        return _UserBubble(entry: entry);
+        return _UserBubble(entry: entry, isNewSender: isNewSender);
       case 'assistant':
-        return _AssistantBubble(entry: entry);
+        return _AssistantBubble(entry: entry, isNewSender: isNewSender);
       case 'tool':
         return _ToolCard(entry: entry);
       default:
@@ -481,20 +494,30 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
   Widget _buildThinkingIndicator(ThemeData theme) {
     final t = ShellTokens.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.only(top: 12, bottom: 4, right: 80),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '... ',
-            style: theme.textTheme.bodyLarge?.copyWith(
-              color: t.fgTertiary,
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: t.surfaceCard,
+              border: Border.all(color: t.border, width: 0.5),
             ),
-          ),
-          SizedBox(
-            width: 8,
-            height: 14,
-            child: _CursorBlink(),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const _StreamingIndicator(),
+                const SizedBox(width: 8),
+                Text(
+                  'thinking',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: t.fgTertiary,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -504,27 +527,40 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
 
 class _UserBubble extends StatelessWidget {
   final ChatEntry entry;
-  const _UserBubble({required this.entry});
+  final bool isNewSender;
+  const _UserBubble({required this.entry, this.isNewSender = true});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final t = ShellTokens.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: SelectableText.rich(
-        TextSpan(
-          children: [
-            TextSpan(
-              text: '> ',
-              style: theme.textTheme.bodyLarge?.copyWith(color: t.accentPrimary),
+      padding: EdgeInsets.only(
+        top: isNewSender ? 14 : 3,
+        bottom: 1,
+        left: 80,
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: t.accentPrimary.withOpacity(0.08),
+                border: Border.all(color: t.accentPrimary.withOpacity(0.18), width: 0.5),
+              ),
+              child: SelectableText(
+                entry.content,
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: t.fgPrimary,
+                  height: 1.5,
+                ),
+              ),
             ),
-            TextSpan(
-              text: entry.content,
-              style: theme.textTheme.bodyLarge,
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -532,7 +568,8 @@ class _UserBubble extends StatelessWidget {
 
 class _AssistantBubble extends StatelessWidget {
   final ChatEntry entry;
-  const _AssistantBubble({required this.entry});
+  final bool isNewSender;
+  const _AssistantBubble({required this.entry, this.isNewSender = true});
 
   @override
   Widget build(BuildContext context) {
@@ -541,55 +578,84 @@ class _AssistantBubble extends StatelessWidget {
     final baseStyle = theme.textTheme.bodyLarge ?? const TextStyle();
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+      padding: EdgeInsets.only(
+        top: isNewSender ? 14 : 3,
+        bottom: 1,
+        right: 48,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          MarkdownBody(
-            data: entry.content,
-            selectable: true,
-            styleSheet: MarkdownStyleSheet(
-              p: baseStyle,
-              h1: baseStyle.copyWith(fontSize: 16, fontWeight: FontWeight.bold, color: t.fgPrimary),
-              h2: baseStyle.copyWith(fontSize: 15, fontWeight: FontWeight.bold, color: t.fgPrimary),
-              h3: baseStyle.copyWith(fontSize: 14, fontWeight: FontWeight.bold),
-              code: baseStyle.copyWith(fontSize: 13, color: t.accentPrimary, backgroundColor: t.surfaceCodeInline),
-              codeblockDecoration: BoxDecoration(
-                color: t.surfaceBase,
-                border: Border(left: BorderSide(color: t.border, width: 2)),
-              ),
-              codeblockPadding: const EdgeInsets.only(left: 12, top: 8, bottom: 8, right: 8),
-              blockquoteDecoration: BoxDecoration(
-                border: Border(left: BorderSide(color: t.fgDisabled, width: 2)),
-              ),
-              blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
-              listBullet: baseStyle.copyWith(color: t.fgTertiary),
-              strong: baseStyle.copyWith(fontWeight: FontWeight.bold),
-              em: baseStyle.copyWith(fontStyle: FontStyle.italic),
-              a: baseStyle.copyWith(
-                color: t.accentPrimary,
-                decoration: TextDecoration.underline,
-                decorationColor: t.accentPrimaryMuted,
-              ),
-              tableHead: baseStyle.copyWith(fontWeight: FontWeight.bold),
-              tableBorder: TableBorder.all(color: t.border, width: 0.5),
-              tableHeadAlign: TextAlign.left,
-              tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              horizontalRuleDecoration: BoxDecoration(
-                border: Border(top: BorderSide(color: t.border, width: 0.5)),
+          if (isNewSender)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4, left: 2),
+              child: Text(
+                'trinity',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: t.fgTertiary,
+                  fontSize: 10,
+                  letterSpacing: 0.5,
+                ),
               ),
             ),
-            onTapLink: (text, href, title) {
-              if (href != null) {
-                Clipboard.setData(ClipboardData(text: href));
-              }
-            },
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: t.surfaceCard,
+              border: Border.all(color: t.border, width: 0.5),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                MarkdownBody(
+                  data: entry.content,
+                  selectable: true,
+                  styleSheet: MarkdownStyleSheet(
+                    p: baseStyle,
+                    h1: baseStyle.copyWith(fontSize: 16, fontWeight: FontWeight.bold, color: t.fgPrimary),
+                    h2: baseStyle.copyWith(fontSize: 15, fontWeight: FontWeight.bold, color: t.fgPrimary),
+                    h3: baseStyle.copyWith(fontSize: 14, fontWeight: FontWeight.bold),
+                    code: baseStyle.copyWith(fontSize: 13, color: t.accentPrimary, backgroundColor: t.surfaceCodeInline),
+                    codeblockDecoration: BoxDecoration(
+                      color: t.surfaceBase,
+                      border: Border(left: BorderSide(color: t.border, width: 2)),
+                    ),
+                    codeblockPadding: const EdgeInsets.only(left: 12, top: 8, bottom: 8, right: 8),
+                    blockquoteDecoration: BoxDecoration(
+                      border: Border(left: BorderSide(color: t.fgDisabled, width: 2)),
+                    ),
+                    blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
+                    listBullet: baseStyle.copyWith(color: t.fgTertiary),
+                    strong: baseStyle.copyWith(fontWeight: FontWeight.bold),
+                    em: baseStyle.copyWith(fontStyle: FontStyle.italic),
+                    a: baseStyle.copyWith(
+                      color: t.accentPrimary,
+                      decoration: TextDecoration.underline,
+                      decorationColor: t.accentPrimaryMuted,
+                    ),
+                    tableHead: baseStyle.copyWith(fontWeight: FontWeight.bold),
+                    tableBorder: TableBorder.all(color: t.border, width: 0.5),
+                    tableHeadAlign: TextAlign.left,
+                    tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    horizontalRuleDecoration: BoxDecoration(
+                      border: Border(top: BorderSide(color: t.border, width: 0.5)),
+                    ),
+                  ),
+                  onTapLink: (text, href, title) {
+                    if (href != null) {
+                      Clipboard.setData(ClipboardData(text: href));
+                    }
+                  },
+                ),
+                if (entry.isStreaming)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: _StreamingIndicator(),
+                  ),
+              ],
+            ),
           ),
-          if (entry.isStreaming)
-            const Padding(
-              padding: EdgeInsets.only(top: 2),
-              child: _StreamingIndicator(),
-            ),
         ],
       ),
     );
@@ -709,8 +775,7 @@ class _ToolCardState extends State<_ToolCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final t = ShellTokens.of(context);
-    final prefix = widget.entry.isStreaming ? '~ ' : '  ';
-    final nameColor = widget.entry.isStreaming ? t.fgTertiary : t.fgMuted;
+    final toolName = widget.entry.toolName ?? 'tool';
     final content = widget.entry.content;
     final isTruncated = content.length > 300;
     final displayContent = _expanded || !isTruncated
@@ -718,45 +783,66 @@ class _ToolCardState extends State<_ToolCard> {
         : '${content.substring(0, 300)}...';
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 1),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '$prefix${widget.entry.toolName ?? 'tool'}',
-            style: theme.textTheme.labelSmall?.copyWith(color: nameColor),
-          ),
-          if (content.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SelectableText(
-                    displayContent,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      fontSize: 12,
-                      color: t.fgTertiary,
-                    ),
+      padding: const EdgeInsets.only(top: 3, bottom: 3, right: 48),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: t.surfaceBase,
+          border: Border.all(color: t.border, width: 0.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                if (widget.entry.isStreaming) ...[
+                  SizedBox(
+                    width: 12,
+                    height: 8,
+                    child: const _StreamingIndicator(),
                   ),
-                  if (isTruncated)
-                    GestureDetector(
-                      onTap: () => setState(() => _expanded = !_expanded),
-                      child: MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: Text(
-                          _expanded ? 'show less' : 'show more',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: t.accentPrimary,
-                          ),
+                  const SizedBox(width: 6),
+                ],
+                Text(
+                  toolName,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: widget.entry.isStreaming ? t.accentPrimary : t.fgTertiary,
+                    fontSize: 10,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
+            ),
+            if (content.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              SelectableText(
+                displayContent,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontSize: 11,
+                  color: t.fgTertiary,
+                  height: 1.4,
+                ),
+              ),
+              if (isTruncated)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: GestureDetector(
+                    onTap: () => setState(() => _expanded = !_expanded),
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: Text(
+                        _expanded ? 'show less' : 'show more',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: t.accentPrimary,
                         ),
                       ),
                     ),
-                ],
-              ),
-            ),
-        ],
+                  ),
+                ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -770,12 +856,16 @@ class _SystemMessage extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = ShellTokens.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 1),
-      child: Text(
-        entry.content,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: t.fgDisabled,
-            ),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Center(
+        child: Text(
+          entry.content,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: t.fgDisabled,
+                fontSize: 11,
+              ),
+          textAlign: TextAlign.center,
+        ),
       ),
     );
   }

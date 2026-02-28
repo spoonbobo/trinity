@@ -118,17 +118,26 @@ terminal:
     - crons list --json
     - cron list
     - cron list --json
+    - hooks list
+    - hooks list --json
+    - hooks check
+    - hooks check --json
     - cat /home/node/.openclaw/workspace/MEMORY.md
   standard:
     - doctor
     - skills
     - cron
+    - hooks
+    - hooks enable
+    - hooks disable
+    - hooks info
     - clawhub
     - sessions
     - logs
     - channels
     - tools
     - memory
+    - message poll
     - config get
     - config validate
   privileged:

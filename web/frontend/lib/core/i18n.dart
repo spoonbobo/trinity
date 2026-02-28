@@ -175,6 +175,101 @@ String tr(AppLanguage language, String key) {
       'zh-Hans': '会话',
       'zh-Hant': '會話',
     },
+    'schedule_simple': {
+      'en': 'simple',
+      'zh-Hans': '简易',
+      'zh-Hant': '簡易',
+    },
+    'schedule_cron': {
+      'en': 'cron',
+      'zh-Hans': '表达式',
+      'zh-Hant': '表達式',
+    },
+    'frequency': {
+      'en': 'frequency',
+      'zh-Hans': '频率',
+      'zh-Hant': '頻率',
+    },
+    'sessions_label': {
+      'en': 'sessions',
+      'zh-Hans': '会话列表',
+      'zh-Hant': '會話列表',
+    },
+    'new_session': {
+      'en': 'new session',
+      'zh-Hans': '新会话',
+      'zh-Hant': '新會話',
+    },
+    'main_session': {
+      'en': 'main',
+      'zh-Hans': '主会话',
+      'zh-Hant': '主會話',
+    },
+    'command_palette': {
+      'en': 'command palette',
+      'zh-Hans': '命令面板',
+      'zh-Hant': '命令面板',
+    },
+    'type_command': {
+      'en': 'type a command...',
+      'zh-Hans': '输入命令...',
+      'zh-Hant': '輸入命令...',
+    },
+    'notifications': {
+      'en': 'notifications',
+      'zh-Hans': '通知',
+      'zh-Hant': '通知',
+    },
+    'no_notifications': {
+      'en': 'no notifications',
+      'zh-Hans': '暂无通知',
+      'zh-Hant': '暫無通知',
+    },
+    'clear_all': {
+      'en': 'clear all',
+      'zh-Hans': '清除全部',
+      'zh-Hant': '清除全部',
+    },
+    'templates': {
+      'en': 'templates',
+      'zh-Hans': '模板',
+      'zh-Hant': '範本',
+    },
+    'save_template': {
+      'en': 'save as template',
+      'zh-Hans': '保存为模板',
+      'zh-Hant': '儲存為範本',
+    },
+    'attach_file': {
+      'en': 'attach file',
+      'zh-Hans': '附加文件',
+      'zh-Hant': '附加檔案',
+    },
+    'export_canvas': {
+      'en': 'export',
+      'zh-Hans': '导出',
+      'zh-Hant': '匯出',
+    },
+    'copy_image': {
+      'en': 'copy as image',
+      'zh-Hans': '复制为图片',
+      'zh-Hant': '複製為圖片',
+    },
+    'download_png': {
+      'en': 'download PNG',
+      'zh-Hans': '下载PNG',
+      'zh-Hant': '下載PNG',
+    },
+    'download_json': {
+      'en': 'download JSON',
+      'zh-Hans': '下载JSON',
+      'zh-Hant': '下載JSON',
+    },
+    'sso_login': {
+      'en': 'sign in with SSO',
+      'zh-Hans': '使用SSO登录',
+      'zh-Hant': '使用SSO登入',
+    },
   };
 
   final langKey = switch (language) {

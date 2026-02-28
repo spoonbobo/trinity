@@ -8,25 +8,16 @@ import '../../core/toast_provider.dart';
 import '../../main.dart' show languageProvider;
 import '../../core/providers.dart' show terminalClientProvider;
 
-enum CatalogTab { skills, crons }
-
 enum SkillsCategory { ready, notReady, clawhub, templates }
 
-enum CronCategory { existing, templates }
-
-class SkillsCronDialog extends ConsumerStatefulWidget {
-  final CatalogTab initialTab;
-
-  const SkillsCronDialog({
-    super.key,
-    this.initialTab = CatalogTab.skills,
-  });
+class SkillsDialog extends ConsumerStatefulWidget {
+  const SkillsDialog({super.key});
 
   @override
-  ConsumerState<SkillsCronDialog> createState() => _SkillsCronDialogState();
+  ConsumerState<SkillsDialog> createState() => _SkillsDialogState();
 }
 
-class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
+class _SkillsDialogState extends ConsumerState<SkillsDialog> {
   final TextEditingController _clawhubQueryController = TextEditingController();
   bool _loading = false;
   String? _error;
@@ -42,21 +33,16 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
     return input.replaceAll(ansi, '');
   }
 
-  CatalogTab _tab = CatalogTab.skills;
   SkillsCategory _skillsCategory = SkillsCategory.ready;
-  CronCategory _cronCategory = CronCategory.existing;
 
   List<Map<String, dynamic>> _skills = [];
-  List<Map<String, dynamic>> _cronJobs = [];
 
   int _skillsPage = 0;
-  int _cronPage = 0;
   static const int _pageSize = 14;
 
   @override
   void initState() {
     super.initState();
-    _tab = widget.initialTab;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadData();
     });
@@ -92,7 +78,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
       try {
         await client.connect();
       } catch (_) {}
-      await Future.delayed(const Duration(milliseconds: 400));
     }
 
     if (!client.isAuthenticated) {
@@ -112,19 +97,10 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
         'skills list --json',
         timeout: const Duration(seconds: 45),
       );
-      final cronRaw = await client.executeCommandForOutput(
-        'cron list --json',
-        timeout: const Duration(seconds: 30),
-      );
 
       final skillsJson = _decodeJsonObject(skillsRaw);
-      final cronJson = _decodeJsonObject(cronRaw);
 
       final skills = ((skillsJson['skills'] as List?) ?? const [])
-          .whereType<Map>()
-          .map((e) => e.map((k, v) => MapEntry(k.toString(), v)))
-          .toList();
-      final jobs = ((cronJson['jobs'] as List?) ?? const [])
           .whereType<Map>()
           .map((e) => e.map((k, v) => MapEntry(k.toString(), v)))
           .toList();
@@ -132,13 +108,11 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
       if (!mounted) return;
       setState(() {
         _skills = skills;
-        _cronJobs = jobs;
         _skillsPage = 0;
-        _cronPage = 0;
       });
     } catch (e) {
       if (!mounted) return;
-      final errMsg = 'failed to load skills/cron: $e';
+      final errMsg = 'failed to load skills: $e';
       ToastService.showError(context, errMsg);
       setState(() {
         _error = errMsg;
@@ -177,7 +151,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
       await _loadData();
     } catch (e) {
       if (!mounted) return;
-      // Show missing requirements hint if this is a bundled skill
       final missing = row['missing'] as Map<String, dynamic>?;
       final missingHints = <String>[];
       if (missing != null) {
@@ -291,7 +264,7 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
               .split('\n')
               .map(_stripAnsi)
               .map((s) => s.trim())
-              .where((s) => s.isNotEmpty && !s.startsWith('4 '))
+              .where((s) => s.isNotEmpty && !s.startsWith('4 '))
               .take(4)
               .join(' | ');
           _clawhubError = rawLines.isEmpty
@@ -358,7 +331,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
       );
 
       final cleaned = _stripAnsi(raw).trim();
-      // Find the first '{' to skip any leading text like "- Fetching skill"
       final jsonStart = cleaned.indexOf('{');
       final jsonEnd = cleaned.lastIndexOf('}');
       if (jsonStart < 0 || jsonEnd < jsonStart) {
@@ -420,7 +392,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Header: name + close
                 Row(
                   children: [
                     Expanded(
@@ -436,7 +407,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
                   ],
                 ),
                 const SizedBox(height: 4),
-                // Slug + version + author
                 Text(
                   [
                     slug,
@@ -446,7 +416,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
                   style: theme.textTheme.labelSmall?.copyWith(color: t.fgTertiary),
                 ),
                 const SizedBox(height: 4),
-                // Stats row
                 Text(
                   [
                     '$downloads downloads',
@@ -456,7 +425,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
                   style: theme.textTheme.labelSmall?.copyWith(color: t.fgMuted),
                 ),
                 const SizedBox(height: 12),
-                // Summary
                 if (summary.isNotEmpty) ...[
                   Text(
                     summary,
@@ -464,7 +432,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
                   ),
                   const SizedBox(height: 12),
                 ],
-                // Changelog
                 if (changelog.isNotEmpty) ...[
                   Text(
                     'changelog',
@@ -488,7 +455,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
     );
   }
 
-  /// Inspect a bundled/local template skill by reading its SKILL.md from the container.
   Future<void> _inspectTemplateSkill(Map<String, dynamic> skill) async {
     final client = ref.read(terminalClientProvider);
     final name = (skill['name'] ?? '').toString().trim();
@@ -497,7 +463,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
     setState(() => _inspectingSkill = name);
 
     try {
-      // Try managed skills dir first, then workspace
       String raw = '';
       try {
         raw = await client.executeCommandForOutput(
@@ -517,7 +482,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
         return;
       }
 
-      // Parse YAML frontmatter (between ---) and markdown body
       String body = content;
       if (content.startsWith('---')) {
         final endIdx = content.indexOf('---', 3);
@@ -574,7 +538,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -618,7 +581,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    // Status + source
                     Text(
                       [
                         eligible ? 'ready' : 'not ready',
@@ -631,7 +593,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
                       const SizedBox(height: 6),
                       Text(desc, style: theme.textTheme.bodySmall?.copyWith(color: t.fgMuted)),
                     ],
-                    // Missing requirements
                     if (!eligible) ...[
                       const SizedBox(height: 8),
                       if (missingBins.isNotEmpty)
@@ -648,7 +609,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
                   ],
                 ),
               ),
-              // Body: SKILL.md markdown content
               Expanded(
                 child: markdownBody.isEmpty
                     ? Center(
@@ -708,7 +668,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
   }
 
   bool _isTemplate(Map<String, dynamic> skill) {
-    // OpenClaw marks bundled/seeded skills with bundled:true and source:"openclaw-managed"
     return skill['bundled'] == true;
   }
 
@@ -729,38 +688,15 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
     }
   }
 
-  bool _isCronTemplate(Map<String, dynamic> job) {
-    final source = (job['source'] ?? '').toString().toLowerCase();
-    final kind = (job['kind'] ?? '').toString().toLowerCase();
-    final id = (job['id'] ?? '').toString().toLowerCase();
-    final name = (job['name'] ?? '').toString().toLowerCase();
-    return source.contains('template') ||
-        kind.contains('template') ||
-        id.contains('template') ||
-        name.contains('template');
-  }
-
-  List<Map<String, dynamic>> _cronsForCategory() {
-    switch (_cronCategory) {
-      case CronCategory.existing:
-        return _cronJobs.where((j) => !_isCronTemplate(j)).toList();
-      case CronCategory.templates:
-        return _cronJobs.where(_isCronTemplate).toList();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final t = ShellTokens.of(context);
     final theme = Theme.of(context);
+    final language = ref.watch(languageProvider);
 
     final categoryRows = _skillsForCategory();
-    final cronCategoryRows = _cronsForCategory();
     final skillsPages = (categoryRows.length / _pageSize).ceil().clamp(1, 9999);
-    final cronPages = (cronCategoryRows.length / _pageSize).ceil().clamp(1, 9999);
-
     final skillsPageRows = _slicePage(categoryRows, _skillsPage);
-    final cronPageRows = _slicePage(cronCategoryRows, _cronPage);
 
     return Dialog(
       backgroundColor: t.surfaceBase,
@@ -781,19 +717,10 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
               ),
               child: Row(
                 children: [
-                  _topToggle('skills', _tab == CatalogTab.skills, () {
-                    setState(() {
-                      _tab = CatalogTab.skills;
-                      _skillsPage = 0;
-                    });
-                  }),
-                  const SizedBox(width: 12),
-                  _topToggle('crons', _tab == CatalogTab.crons, () {
-                    setState(() {
-                      _tab = CatalogTab.crons;
-                      _cronPage = 0;
-                    });
-                  }),
+                  Text(
+                    tr(language, 'skills'),
+                    style: theme.textTheme.bodyMedium?.copyWith(color: t.accentPrimary),
+                  ),
                   const SizedBox(width: 12),
                   if (_loading)
                     Text(
@@ -810,21 +737,23 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
                       ),
                     ),
                   ),
+                  const SizedBox(width: 12),
+                  GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: Text(
+                      tr(language, 'close'),
+                      style: theme.textTheme.labelSmall?.copyWith(color: t.fgMuted),
+                    ),
+                  ),
                 ],
               ),
             ),
             Expanded(
-                child: _tab == CatalogTab.skills
-                    ? _buildSkillsView(
-                        skillsPageRows: skillsPageRows,
-                        pages: skillsPages,
-                        totalRows: categoryRows.length,
-                      )
-                    : _buildCronsView(
-                        cronPageRows: cronPageRows,
-                        pages: cronPages,
-                        totalRows: cronCategoryRows.length,
-                      ),
+              child: _buildSkillsView(
+                skillsPageRows: skillsPageRows,
+                pages: skillsPages,
+                totalRows: categoryRows.length,
+              ),
             ),
           ],
         ),
@@ -1043,90 +972,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
     );
   }
 
-  Widget _buildCronsView({
-    required List<Map<String, dynamic>> cronPageRows,
-    required int pages,
-    required int totalRows,
-  }) {
-    final t = ShellTokens.of(context);
-    final theme = Theme.of(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: t.border, width: 0.5)),
-          ),
-          child: Row(
-            children: [
-              Text(
-                'cron jobs ($totalRows)',
-                style: theme.textTheme.bodyMedium?.copyWith(color: t.fgPrimary),
-              ),
-              const SizedBox(width: 12),
-              _categoryToggle('existing', _cronCategory == CronCategory.existing, () {
-                setState(() {
-                  _cronCategory = CronCategory.existing;
-                  _cronPage = 0;
-                });
-              }),
-              const SizedBox(width: 10),
-              _categoryToggle('templates', _cronCategory == CronCategory.templates, () {
-                setState(() {
-                  _cronCategory = CronCategory.templates;
-                  _cronPage = 0;
-                });
-              }),
-              const Spacer(),
-              Text(
-                '${_cronPage + 1}/$pages',
-                style: theme.textTheme.labelSmall?.copyWith(color: t.fgTertiary),
-              ),
-              const SizedBox(width: 10),
-              _pageControl('prev', _cronPage > 0, () {
-                setState(() => _cronPage -= 1);
-              }),
-              const SizedBox(width: 8),
-              _pageControl('next', _cronPage + 1 < pages, () {
-                setState(() => _cronPage += 1);
-              }),
-            ],
-          ),
-        ),
-        Expanded(
-          child: totalRows == 0
-              ? Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(
-                    'no cron jobs configured',
-                    style: theme.textTheme.bodyMedium?.copyWith(color: t.fgPlaceholder),
-                  ),
-                )
-              : ListView(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  children: cronPageRows.map(_cronRow).toList(),
-                ),
-        ),
-      ],
-    );
-  }
-
-  Widget _topToggle(String label, bool active, VoidCallback onTap) {
-    final t = ShellTokens.of(context);
-    final theme = Theme.of(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: Text(
-        label,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          color: active ? t.accentPrimary : t.fgMuted,
-        ),
-      ),
-    );
-  }
-
   Widget _categoryToggle(String label, bool active, VoidCallback onTap) {
     final t = ShellTokens.of(context);
     final theme = Theme.of(context);
@@ -1186,7 +1031,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
                   ),
                 ),
               ),
-              // Detail link (for bundled/template skills)
               if (isBundled) ...[
                 GestureDetector(
                   onTap: inspecting ? null : () => _inspectTemplateSkill(row),
@@ -1225,25 +1069,6 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
               ),
             ),
         ],
-      ),
-    );
-  }
-
-  Widget _cronRow(Map<String, dynamic> row) {
-    final t = ShellTokens.of(context);
-    final theme = Theme.of(context);
-    final id = (row['id'] ?? '(job)').toString();
-    final schedule = (row['schedule'] ?? '-').toString();
-    final command = (row['command'] ?? row['task'] ?? '').toString();
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Text(
-        '$id  $schedule  $command',
-        style: theme.textTheme.bodyMedium?.copyWith(
-          color: t.fgTertiary,
-          fontSize: 12,
-        ),
       ),
     );
   }

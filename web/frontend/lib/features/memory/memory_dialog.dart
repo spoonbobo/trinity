@@ -34,7 +34,6 @@ class _MemoryDialogState extends ConsumerState<MemoryDialog> {
     try {
       if (!client.isConnected || !client.isAuthenticated) {
         await client.connect();
-        await Future.delayed(const Duration(milliseconds: 400));
       }
 
       if (!client.isAuthenticated) {
