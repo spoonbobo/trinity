@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import '../../core/theme.dart';
 import '../../core/i18n.dart';
 import '../../core/toast_provider.dart';
@@ -176,7 +177,19 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
       await _loadData();
     } catch (e) {
       if (!mounted) return;
-      final errMsg = 'failed to install $rawName: $e';
+      // Show missing requirements hint if this is a bundled skill
+      final missing = row['missing'] as Map<String, dynamic>?;
+      final missingHints = <String>[];
+      if (missing != null) {
+        final bins = (missing['bins'] as List?)?.cast<String>() ?? [];
+        final anyBins = (missing['anyBins'] as List?)?.cast<String>() ?? [];
+        final env = (missing['env'] as List?)?.cast<String>() ?? [];
+        if (bins.isNotEmpty) missingHints.add('bins: ${bins.join(", ")}');
+        if (anyBins.isNotEmpty) missingHints.add('any of: ${anyBins.join(", ")}');
+        if (env.isNotEmpty) missingHints.add('env: ${env.join(", ")}');
+      }
+      final hint = missingHints.isNotEmpty ? ' (missing ${missingHints.join("; ")})' : '';
+      final errMsg = 'install $rawName failed$hint';
       ToastService.showError(context, errMsg);
       setState(() {
         _error = errMsg;
@@ -475,6 +488,218 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
     );
   }
 
+  /// Inspect a bundled/local template skill by reading its SKILL.md from the container.
+  Future<void> _inspectTemplateSkill(Map<String, dynamic> skill) async {
+    final client = ref.read(terminalClientProvider);
+    final name = (skill['name'] ?? '').toString().trim();
+    if (name.isEmpty) return;
+
+    setState(() => _inspectingSkill = name);
+
+    try {
+      // Try managed skills dir first, then workspace
+      String raw = '';
+      try {
+        raw = await client.executeCommandForOutput(
+          'cat /home/node/.openclaw/skills/$name/SKILL.md',
+          timeout: const Duration(seconds: 10),
+        );
+      } catch (_) {
+        raw = await client.executeCommandForOutput(
+          'cat /home/node/.openclaw/workspace/skills/$name/SKILL.md',
+          timeout: const Duration(seconds: 10),
+        );
+      }
+
+      final content = _stripAnsi(raw).trim();
+      if (content.isEmpty || !mounted) {
+        setState(() => _inspectingSkill = null);
+        return;
+      }
+
+      // Parse YAML frontmatter (between ---) and markdown body
+      String body = content;
+      if (content.startsWith('---')) {
+        final endIdx = content.indexOf('---', 3);
+        if (endIdx > 3) {
+          body = content.substring(endIdx + 3).trim();
+        }
+      }
+
+      if (!mounted) return;
+      setState(() => _inspectingSkill = null);
+      _showTemplateInspectDialog(skill, body);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _inspectingSkill = null;
+        _error = 'inspect failed: $e';
+      });
+    }
+  }
+
+  void _showTemplateInspectDialog(Map<String, dynamic> skill, String markdownBody) {
+    final t = ShellTokens.of(context);
+    final theme = Theme.of(context);
+
+    final name = (skill['name'] ?? 'unknown').toString();
+    final emoji = (skill['emoji'] ?? '').toString();
+    final desc = (skill['description'] ?? '').toString();
+    final homepage = (skill['homepage'] ?? '').toString();
+    final eligible = skill['eligible'] == true;
+    final source = (skill['source'] ?? '').toString();
+    final missing = skill['missing'] as Map<String, dynamic>? ?? {};
+
+    final missingBins = (missing['bins'] as List?)?.cast<String>() ?? [];
+    final missingAnyBins = (missing['anyBins'] as List?)?.cast<String>() ?? [];
+    final missingEnv = (missing['env'] as List?)?.cast<String>() ?? [];
+    final missingConfig = (missing['config'] as List?)?.cast<String>() ?? [];
+    final missingOs = (missing['os'] as List?)?.cast<String>() ?? [];
+
+    final installing = _installingSkill == name;
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => Dialog(
+        backgroundColor: t.surfaceBase,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.zero,
+          side: BorderSide(color: t.border, width: 0.5),
+        ),
+        child: Container(
+          width: MediaQuery.of(ctx).size.width * 0.7,
+          height: MediaQuery.of(ctx).size.height * 0.78,
+          constraints: const BoxConstraints(maxWidth: 680, maxHeight: 640),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: t.border, width: 0.5)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        if (emoji.isNotEmpty) ...[
+                          Text(emoji, style: const TextStyle(fontSize: 18)),
+                          const SizedBox(width: 8),
+                        ],
+                        Expanded(
+                          child: Text(
+                            name,
+                            style: theme.textTheme.titleMedium?.copyWith(color: t.fgPrimary),
+                          ),
+                        ),
+                        if (!eligible)
+                          GestureDetector(
+                            onTap: installing
+                                ? null
+                                : () {
+                                    Navigator.of(ctx).pop();
+                                    _installSkill(skill);
+                                  },
+                            child: Text(
+                              installing ? 'installing...' : 'install',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: installing ? t.fgDisabled : t.accentPrimary,
+                              ),
+                            ),
+                          ),
+                        const SizedBox(width: 12),
+                        GestureDetector(
+                          onTap: () => Navigator.of(ctx).pop(),
+                          child: Text('x', style: theme.textTheme.labelSmall?.copyWith(color: t.fgTertiary)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    // Status + source
+                    Text(
+                      [
+                        eligible ? 'ready' : 'not ready',
+                        source,
+                        if (homepage.isNotEmpty) homepage,
+                      ].join('  '),
+                      style: theme.textTheme.labelSmall?.copyWith(color: t.fgTertiary),
+                    ),
+                    if (desc.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(desc, style: theme.textTheme.bodySmall?.copyWith(color: t.fgMuted)),
+                    ],
+                    // Missing requirements
+                    if (!eligible) ...[
+                      const SizedBox(height: 8),
+                      if (missingBins.isNotEmpty)
+                        _requirementChip('bins: ${missingBins.join(", ")}', t, theme),
+                      if (missingAnyBins.isNotEmpty)
+                        _requirementChip('any of: ${missingAnyBins.join(", ")}', t, theme),
+                      if (missingEnv.isNotEmpty)
+                        _requirementChip('env: ${missingEnv.join(", ")}', t, theme),
+                      if (missingConfig.isNotEmpty)
+                        _requirementChip('config: ${missingConfig.join(", ")}', t, theme),
+                      if (missingOs.isNotEmpty)
+                        _requirementChip('os: ${missingOs.join(", ")}', t, theme),
+                    ],
+                  ],
+                ),
+              ),
+              // Body: SKILL.md markdown content
+              Expanded(
+                child: markdownBody.isEmpty
+                    ? Center(
+                        child: Text('no content', style: theme.textTheme.bodyMedium?.copyWith(color: t.fgPlaceholder)),
+                      )
+                    : Markdown(
+                        data: markdownBody,
+                        selectable: true,
+                        padding: const EdgeInsets.all(16),
+                        styleSheet: MarkdownStyleSheet(
+                          p: theme.textTheme.bodySmall?.copyWith(color: t.fgPrimary, fontSize: 12, height: 1.5),
+                          h1: theme.textTheme.titleMedium?.copyWith(color: t.fgPrimary),
+                          h2: theme.textTheme.titleSmall?.copyWith(color: t.fgPrimary),
+                          h3: theme.textTheme.bodyMedium?.copyWith(color: t.fgPrimary, fontWeight: FontWeight.bold),
+                          code: theme.textTheme.bodySmall?.copyWith(color: t.accentPrimary, fontSize: 11),
+                          codeblockDecoration: BoxDecoration(
+                            color: t.surfaceCard,
+                            border: Border.all(color: t.border, width: 0.5),
+                          ),
+                          codeblockPadding: const EdgeInsets.all(10),
+                          blockquoteDecoration: BoxDecoration(
+                            border: Border(left: BorderSide(color: t.border, width: 2)),
+                          ),
+                          listBullet: theme.textTheme.bodySmall?.copyWith(color: t.fgMuted, fontSize: 12),
+                          tableHead: theme.textTheme.bodySmall?.copyWith(color: t.fgTertiary, fontSize: 11),
+                          tableBody: theme.textTheme.bodySmall?.copyWith(color: t.fgPrimary, fontSize: 11),
+                          tableBorder: TableBorder.all(color: t.border, width: 0.5),
+                          horizontalRuleDecoration: BoxDecoration(
+                            border: Border(top: BorderSide(color: t.border, width: 0.5)),
+                          ),
+                          a: theme.textTheme.bodySmall?.copyWith(color: t.accentSecondary, fontSize: 12),
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _requirementChip(String text, ShellTokens t, ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Text(
+        'missing $text',
+        style: theme.textTheme.labelSmall?.copyWith(color: t.statusWarning, fontSize: 10),
+      ),
+    );
+  }
+
   List<Map<String, dynamic>> _slicePage(List<Map<String, dynamic>> rows, int page) {
     final start = page * _pageSize;
     if (start >= rows.length) return const [];
@@ -483,12 +708,8 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
   }
 
   bool _isTemplate(Map<String, dynamic> skill) {
-    final source = (skill['source'] ?? '').toString().toLowerCase();
-    final kind = (skill['kind'] ?? '').toString().toLowerCase();
-    final name = (skill['name'] ?? '').toString().toLowerCase();
-    return source.contains('template') ||
-        kind.contains('template') ||
-        name.contains('template');
+    // OpenClaw marks bundled/seeded skills with bundled:true and source:"openclaw-managed"
+    return skill['bundled'] == true;
   }
 
   List<Map<String, dynamic>> _skillsForCategory() {
@@ -940,8 +1161,11 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
     final ready = row['eligible'] == true;
     final name = (row['name'] ?? 'unknown').toString();
     final desc = (row['description'] ?? '').toString();
+    final emoji = (row['emoji'] ?? '').toString();
     final canInstall = !ready;
     final installing = _installingSkill == name;
+    final inspecting = _inspectingSkill == name;
+    final isBundled = row['bundled'] == true;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -950,6 +1174,10 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
         children: [
           Row(
             children: [
+              if (emoji.isNotEmpty) ...[
+                Text(emoji, style: const TextStyle(fontSize: 13)),
+                const SizedBox(width: 6),
+              ],
               Expanded(
                 child: Text(
                   '${ready ? 'ready' : 'missing'}  $name',
@@ -958,6 +1186,19 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
                   ),
                 ),
               ),
+              // Detail link (for bundled/template skills)
+              if (isBundled) ...[
+                GestureDetector(
+                  onTap: inspecting ? null : () => _inspectTemplateSkill(row),
+                  child: Text(
+                    inspecting ? 'loading...' : 'detail',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: inspecting ? t.fgDisabled : t.fgTertiary,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
               if (canInstall)
                 GestureDetector(
                   onTap: installing ? null : () => _installSkill(row),
@@ -970,17 +1211,9 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
                 ),
             ],
           ),
-          if (!canInstall && _skillsCategory == SkillsCategory.templates)
-            Text(
-              'template',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: t.fgTertiary,
-                fontSize: 10,
-              ),
-            ),
           if (desc.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(left: 14),
+              padding: EdgeInsets.only(left: emoji.isNotEmpty ? 25 : 14),
               child: Text(
                 desc,
                 style: theme.textTheme.bodyMedium?.copyWith(

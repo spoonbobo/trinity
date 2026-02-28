@@ -46,7 +46,7 @@ describe('Terminal Proxy RBAC Registry', () => {
     it('should allow safe and standard commands for user', () => {
       expect(isCommandAllowedForTier('status', 'standard')).toBe(true);
       expect(isCommandAllowedForTier('doctor', 'standard')).toBe(true);
-      expect(isCommandAllowedForTier('sessions list', 'standard')).toBe(true);
+      expect(isCommandAllowedForTier('sessions', 'standard')).toBe(true);
     });
 
     it('should allow all commands for admin', () => {

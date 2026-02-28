@@ -27,7 +27,7 @@ class TrinityApp extends ConsumerWidget {
     final language = ref.watch(languageProvider);
 
     return MaterialApp(
-      title: 'Trinity AGI',
+      title: 'Trinity',
       debugShowCheckedModeBanner: false,
       locale: appLanguageToLocale(language),
       supportedLocales: const [

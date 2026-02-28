@@ -48,7 +48,7 @@ class _AdminSessionsTabState extends ConsumerState<AdminSessionsTab> {
 
     try {
       final raw = await client.executeCommandForOutput(
-        'sessions list',
+        'sessions --json',
         timeout: const Duration(seconds: 15),
       );
 
@@ -183,39 +183,44 @@ class _AdminSessionsTabState extends ConsumerState<AdminSessionsTab> {
     final style = theme.textTheme.labelSmall?.copyWith(color: t.fgTertiary, fontSize: 10);
     return Row(
       children: [
-        SizedBox(width: 200, child: Text('session', style: style)),
-        SizedBox(width: 100, child: Text('status', style: style)),
+        SizedBox(width: 220, child: Text('session', style: style)),
+        SizedBox(width: 80, child: Text('kind', style: style)),
         SizedBox(width: 140, child: Text('model', style: style)),
-        Expanded(child: Text('created', style: style)),
+        Expanded(child: Text('updated', style: style)),
       ],
     );
   }
 
   Widget _buildSessionRow(Map<String, dynamic> session, ShellTokens t, ThemeData theme) {
-    final id = (session['id'] ?? session['sessionId'] ?? session['key'] ?? '-').toString();
-    final status = (session['status'] ?? session['state'] ?? '-').toString();
-    final model = (session['model'] ?? session['provider'] ?? '-').toString();
-    final created = (session['createdAt'] ?? session['created'] ?? session['startedAt'] ?? '-').toString();
+    final id = (session['key'] ?? session['sessionId'] ?? session['id'] ?? '-').toString();
+    final kind = (session['kind'] ?? '-').toString();
+    final model = (session['model'] ?? session['modelProvider'] ?? '-').toString();
+    final updated = session['updatedAt'];
 
-    final statusColor = _sessionStatusColor(status, t);
+    final kindColor = _kindColor(kind, t);
     final cellStyle = theme.textTheme.bodySmall?.copyWith(color: t.fgPrimary, fontSize: 11);
 
     // Truncate ID to fit
-    final displayId = id.length > 24 ? '${id.substring(0, 24)}...' : id;
+    final displayId = id.length > 30 ? '${id.substring(0, 30)}...' : id;
+
+    // Format updatedAt from epoch ms
+    final updatedStr = updated is num
+        ? _formatTimestamp(DateTime.fromMillisecondsSinceEpoch(updated.toInt()).toIso8601String())
+        : '-';
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: [
-          SizedBox(width: 200, child: Text(displayId, style: cellStyle)),
+          SizedBox(width: 220, child: Text(displayId, style: cellStyle)),
           SizedBox(
-            width: 100,
-            child: Text(status, style: cellStyle?.copyWith(color: statusColor)),
+            width: 80,
+            child: Text(kind, style: cellStyle?.copyWith(color: kindColor)),
           ),
           SizedBox(width: 140, child: Text(model, style: cellStyle)),
           Expanded(
             child: Text(
-              _formatTimestamp(created),
+              updatedStr,
               style: theme.textTheme.bodySmall?.copyWith(color: t.fgMuted, fontSize: 11),
             ),
           ),
@@ -224,11 +229,11 @@ class _AdminSessionsTabState extends ConsumerState<AdminSessionsTab> {
     );
   }
 
-  Color _sessionStatusColor(String status, ShellTokens t) {
-    final lower = status.toLowerCase();
-    if (lower == 'active' || lower == 'running' || lower == 'connected') return t.accentPrimary;
-    if (lower == 'error' || lower == 'failed' || lower == 'dead') return t.statusError;
-    if (lower == 'idle' || lower == 'waiting') return t.statusWarning;
+  Color _kindColor(String kind, ShellTokens t) {
+    final lower = kind.toLowerCase();
+    if (lower == 'direct') return t.accentPrimary;
+    if (lower == 'group') return t.accentSecondary;
+    if (lower == 'cron' || lower == 'hook') return t.statusWarning;
     return t.fgMuted;
   }
 

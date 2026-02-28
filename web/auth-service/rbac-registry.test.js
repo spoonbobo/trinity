@@ -147,7 +147,7 @@ describe('RBAC Permission Registry', () => {
       const commands = getTerminalCommands('standard');
       expect(commands).toContain('doctor');
       expect(commands).toContain('skills');
-      expect(commands).toContain('sessions list');
+      expect(commands).toContain('sessions');
     });
 
     it('should have privileged commands for admin', () => {
@@ -164,7 +164,7 @@ describe('RBAC Permission Registry', () => {
 
     it('should allow standard commands for privileged tier', () => {
       expect(isCommandAllowedForTier('doctor', 'privileged')).toBe(true);
-      expect(isCommandAllowedForTier('sessions list', 'privileged')).toBe(true);
+      expect(isCommandAllowedForTier('sessions', 'privileged')).toBe(true);
     });
 
     it('should NOT allow privileged commands for safe tier', () => {

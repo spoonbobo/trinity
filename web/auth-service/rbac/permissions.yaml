@@ -124,7 +124,7 @@ terminal:
     - skills
     - cron
     - clawhub
-    - sessions list
+    - sessions
     - logs
     - channels
     - tools

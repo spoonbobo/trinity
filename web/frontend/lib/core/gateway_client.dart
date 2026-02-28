@@ -132,6 +132,7 @@ class GatewayClient extends ChangeNotifier {
   }
 
   /// Send a typed request and return a future that resolves with the response.
+  /// Times out after 30 seconds to prevent silent hangs.
   Future<WsResponse> sendRequest(
     String method,
     Map<String, dynamic> params,
@@ -141,7 +142,16 @@ class GatewayClient extends ChangeNotifier {
     final completer = Completer<WsResponse>();
     _responseCompleters[id] = completer;
     _channel?.sink.add(request.encode());
-    return completer.future;
+    return completer.future.timeout(
+      const Duration(seconds: 30),
+      onTimeout: () {
+        _responseCompleters.remove(id);
+        return WsResponse(id: id, ok: false, payload: {
+          'error': 'Request timed out after 30s',
+          'method': method,
+        });
+      },
+    );
   }
 
   /// Send a chat message to the agent.
@@ -197,15 +207,30 @@ class GatewayClient extends ChangeNotifier {
 
   void _onDone() {
     _state = ConnectionState.disconnected;
-    _responseCompleters.clear();
+    _failPendingCompleters('Connection closed');
     notifyListeners();
   }
 
   void disconnect() {
     _channel?.sink.close();
     _state = ConnectionState.disconnected;
-    _responseCompleters.clear();
+    _failPendingCompleters('Client disconnected');
     notifyListeners();
+  }
+
+  /// Complete all pending request completers with an error response
+  /// so callers are not left hanging indefinitely.
+  void _failPendingCompleters(String reason) {
+    for (final entry in _responseCompleters.entries) {
+      if (!entry.value.isCompleted) {
+        entry.value.complete(WsResponse(
+          id: entry.key,
+          ok: false,
+          payload: {'error': reason},
+        ));
+      }
+    }
+    _responseCompleters.clear();
   }
 
   @override

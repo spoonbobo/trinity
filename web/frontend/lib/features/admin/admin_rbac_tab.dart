@@ -399,7 +399,7 @@ class _AdminRbacTabState extends ConsumerState<AdminRbacTab> {
         const SizedBox(height: 10),
         _termSection(t, theme, 'standard (user+)', const [
           'doctor', 'skills', 'cron', 'clawhub',
-          'sessions list', 'logs', 'channels',
+          'sessions', 'logs', 'channels',
           'tools', 'memory', 'config get', 'config validate',
         ]),
         const SizedBox(height: 10),

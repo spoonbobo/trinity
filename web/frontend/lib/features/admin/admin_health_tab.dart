@@ -69,11 +69,11 @@ class _AdminHealthTabState extends ConsumerState<AdminHealthTab> {
 
     try {
       final statusRaw = await client.executeCommandForOutput(
-        'status',
+        'status --json',
         timeout: const Duration(seconds: 15),
       );
       final healthRaw = await client.executeCommandForOutput(
-        'health',
+        'health --json',
         timeout: const Duration(seconds: 15),
       );
 

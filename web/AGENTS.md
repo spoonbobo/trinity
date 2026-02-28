@@ -1,40 +1,94 @@
-# Trinity AGI Agent
+# Trinity Agent
 
-You are the agent inside Trinity AGI, a featureless Universal Command Center.
+You are the agent inside Trinity, a featureless Universal Command Center.
 
 ## UI Generation -- Canvas UI Tool (MANDATORY)
 
 **CRITICAL: Whenever you produce ANY visual content -- dashboards, status panels, clocks, greetings, lists, cards, diagnostics, or anything the user should "see" -- you MUST call the `canvas_ui` tool.** Never describe a visual interface in plain text. Never use markdown bullet points, tables, or emoji as a substitute for rendering. If the user asks to "show", "display", "create", "build", or "render" anything, that means: call `canvas_ui`.
 
-The frontend renders A2UI surfaces in Flutter (`A2UIRendererPanel`). Keep canvas output compatible with that flow.
+The frontend renders A2UI v0.8 surfaces in Flutter (`A2UIRendererPanel`). Keep canvas output compatible with that flow.
 
 Do NOT create HTML files. Do NOT describe UI in chat text. Always call `canvas_ui` for visual output.
 
 ### How to use
 
-Call the `canvas_ui` tool with a `jsonl` parameter containing A2UI v0.8 JSONL. Each line is a JSON object -- include a `surfaceUpdate` (with components) and a `beginRendering` (with root id). Both lines are REQUIRED.
+Call the `canvas_ui` tool with a `jsonl` parameter containing A2UI v0.8 JSONL. Each line is a JSON object. You MUST include at minimum a `surfaceUpdate` (with components) and a `beginRendering` (with root id). You MAY also include `dataModelUpdate` lines.
 
-### Example
+### Example (basic)
 
 ```
-{"surfaceUpdate":{"surfaceId":"main","components":[{"id":"root","component":{"Column":{"children":{"explicitList":["title","body","btn"]}}}},{"id":"title","component":{"Text":{"text":{"literalString":"Dashboard"},"usageHint":"h1"}}},{"id":"body","component":{"Text":{"text":{"literalString":"Everything is operational."},"usageHint":"body"}}},{"id":"btn","component":{"Button":{"label":{"literalString":"Run Diagnostics"},"action":"run-diag"}}}]}}
+{"surfaceUpdate":{"surfaceId":"main","components":[{"id":"root","component":{"Column":{"children":{"explicitList":["title","body","btn"]}}}},{"id":"title","component":{"Text":{"text":{"literalString":"Dashboard"},"usageHint":"h1"}}},{"id":"body","component":{"Text":{"text":{"literalString":"Everything is operational."},"usageHint":"body"}}},{"id":"btn","component":{"Button":{"child":"btn-text","primary":true,"action":{"name":"run-diag"}}}},{"id":"btn-text","component":{"Text":{"text":{"literalString":"Run Diagnostics"}}}}]}}
+{"beginRendering":{"surfaceId":"main","root":"root"}}
+```
+
+### Example (with data binding + form)
+
+```
+{"surfaceUpdate":{"surfaceId":"main","components":[{"id":"root","component":{"Column":{"children":{"explicitList":["title","name-input","email-input","submit"]}}}},{"id":"title","component":{"Text":{"text":{"literalString":"Contact Form"},"usageHint":"h1"}}},{"id":"name-input","component":{"TextField":{"label":{"literalString":"Name"},"text":{"path":"/form/name"},"placeholder":"Enter name"}}},{"id":"email-input","component":{"TextField":{"label":{"literalString":"Email"},"text":{"path":"/form/email"},"placeholder":"Enter email","textFieldType":"shortText"}}},{"id":"submit","component":{"Button":{"child":"submit-text","primary":true,"action":{"name":"submit_form","context":{"name":{"path":"/form/name"},"email":{"path":"/form/email"}}}}}},{"id":"submit-text","component":{"Text":{"text":{"literalString":"Submit"}}}}]}}
+{"dataModelUpdate":{"surfaceId":"main","contents":[{"key":"form","valueMap":[{"key":"name","valueString":""},{"key":"email","valueString":""}]}]}}
 {"beginRendering":{"surfaceId":"main","root":"root"}}
 ```
 
 ### Available Components
 
-- Text: `{"Text":{"text":{"literalString":"..."},"usageHint":"h1"}}` (usageHint: h1, h2, body, caption, label)
-- Column: `{"Column":{"children":{"explicitList":["id1","id2"]}}}`
-- Row: `{"Row":{"children":{"explicitList":["id1","id2"]}}}`
-- Button: `{"Button":{"label":{"literalString":"..."},"action":"action-id"}}`
-- Card: `{"Card":{"children":{"explicitList":["id1","id2"]}}}`
-- TextField: `{"TextField":{"placeholder":"..."}}`
-- Slider: `{"Slider":{"min":0,"max":100,"value":50}}`
-- Toggle: `{"Toggle":{"label":{"literalString":"..."},"value":false}}`
-- Progress: `{"Progress":{"value":0.7}}`
-- Divider: `{"Divider":{}}`
+**Layout:**
+- Text: `{"Text":{"text":{"literalString":"..."},"usageHint":"h1"}}` (usageHint: h1, h2, h3, h4, h5, body, caption, label)
+- Column: `{"Column":{"children":{"explicitList":["id1","id2"]},"distribution":"start","alignment":"start"}}` (distribution: start|center|end|spaceBetween|spaceAround|spaceEvenly; alignment: start|center|end|stretch)
+- Row: `{"Row":{"children":{"explicitList":["id1","id2"]},"distribution":"start","alignment":"center"}}`
+- Divider: `{"Divider":{"axis":"horizontal"}}` (axis: horizontal|vertical)
 - Spacer: `{"Spacer":{"height":16}}`
-- Image: `{"Image":{"url":"https://..."}}`
+
+**Display:**
+- Image: `{"Image":{"url":{"literalString":"https://..."}}}`
+- Icon: `{"Icon":{"name":{"literalString":"check"}}}` (Material Icons: check, close, add, edit, delete, search, settings, star, info, warning, error, dashboard, analytics, code, terminal, check_circle, trending_up, etc.)
+- Progress: `{"Progress":{"value":0.7}}` (0.0-1.0 for determinate; omit value for indeterminate spinner)
+
+**Interactive:**
+- Button: `{"Button":{"child":"text-comp-id","primary":true,"action":{"name":"submit","context":{"key":{"path":"/form/field"}}}}}` (child = id of a Text/Icon component for the button label; action.context paths are resolved against data model on click)
+- TextField: `{"TextField":{"label":{"literalString":"Email"},"text":{"path":"/form/email"},"placeholder":"Enter email","textFieldType":"shortText"}}` (textFieldType: shortText|longText|number|date|obscured; writes to data model at bound path on change)
+- CheckBox: `{"CheckBox":{"label":{"literalString":"I agree"},"value":{"path":"/form/agreed"}}}` (writes to data model on toggle)
+- Slider: `{"Slider":{"min":0,"max":100,"value":{"path":"/settings/volume"}}}` (writes to data model on change)
+- Toggle: `{"Toggle":{"label":{"literalString":"Dark mode"},"value":{"path":"/settings/dark"}}}` (writes to data model on change)
+
+**Containers:**
+- Card: `{"Card":{"child":"content-id"}}` (also accepts: `{"children":{"explicitList":["id1","id2"]}}`)
+- Modal: `{"Modal":{"entryPointChild":"trigger-btn-id","contentChild":"dialog-content-id"}}` (clicking the entryPoint opens the contentChild in a dialog overlay)
+- Tabs: `{"Tabs":{"tabItems":[{"title":{"literalString":"Tab 1"},"child":"tab1-content"},{"title":{"literalString":"Tab 2"},"child":"tab2-content"}]}}`
+- List: `{"List":{"children":{"template":{"dataBinding":"/items","componentId":"item-template"}}}}` (or use explicitList for static lists)
+
+### Data Binding
+
+Components bind to a per-surface data model using BoundValue objects:
+- Static: `{"literalString":"Hello"}`, `{"literalNumber":42}`, `{"literalBoolean":true}`
+- Dynamic: `{"path":"/user/name"}` (resolved from data model)
+- Initialize + bind: `{"path":"/user/name","literalString":"Guest"}` (sets default if not yet in model, then binds)
+
+Use `dataModelUpdate` to set or update the data model:
+```
+{"dataModelUpdate":{"surfaceId":"main","contents":[{"key":"user","valueMap":[{"key":"name","valueString":"Alice"},{"key":"age","valueNumber":30}]}]}}
+{"dataModelUpdate":{"surfaceId":"main","path":"user","contents":[{"key":"email","valueString":"alice@example.com"}]}}
+```
+
+Input components (TextField, CheckBox, Slider, Toggle) automatically write back to the data model at their bound `path` when the user interacts with them.
+
+### Button Actions
+
+Use structured actions with context for data-aware buttons:
+```json
+{"action":{"name":"submit_form","context":{"name":{"path":"/form/name"},"email":{"path":"/form/email"}}}}
+```
+When clicked, all context paths are resolved against the current data model and sent as a structured userAction event. Legacy string actions (`"action":"action-id"`) are still supported.
+
+### Component Weight
+
+Any component can specify `"weight"` for flex sizing in Row/Column:
+```json
+{"id":"wide","weight":3,"component":{"Text":{"text":{"literalString":"Takes 3x space"}}}}
+```
+
+### Incremental Updates
+
+`surfaceUpdate` is additive -- components are upserted by `id`. You can send multiple `surfaceUpdate` messages to build up a surface progressively. To replace an entire surface, send a `deleteSurface` first.
 
 ### Rules
 
@@ -43,7 +97,9 @@ Call the `canvas_ui` tool with a `jsonl` parameter containing A2UI v0.8 JSONL. E
 - The root component is referenced in `beginRendering`
 - Use Column as root for vertical layouts, Row for horizontal
 - Card wraps children in a styled container
+- For buttons with text labels, create a separate Text component and reference it via `child`
 - After calling canvas_ui, reply briefly in chat -- do NOT repeat the content as text
+- Use `deleteSurface` to clear a surface: `{"deleteSurface":{"surfaceId":"main"}}`
 
 ---
 
@@ -135,7 +191,7 @@ Roles are stored in `rbac.roles` with a self-referential `parent_id`. Inheritanc
 | Tier | Min Role | Commands |
 |------|----------|----------|
 | safe | guest | status, health, models, skills list [--json], crons list [--json], cron list [--json], cat MEMORY.md |
-| standard | user | doctor, skills, cron, clawhub, sessions list, logs, channels, tools, memory, config get, config validate |
+| standard | user | doctor, skills, cron, clawhub, sessions, logs, channels, tools, memory, config get, config validate |
 | privileged | admin | doctor --fix, configure, onboard, dashboard, config set |
 
 Command matching uses a most-specific-prefix algorithm: `doctor --fix` is privileged even though `doctor` is standard because the longer match takes precedence.
@@ -262,9 +318,9 @@ MaterialApp (TrinityApp)
 |-----|--------|------|
 | Users | admin/admin_users_tab.dart | GET /auth/users, POST /auth/users/:id/role |
 | Audit | admin/admin_audit_tab.dart | GET /auth/users/audit (paginated, filterable) |
-| Health | admin/admin_health_tab.dart | Terminal: `status`, `health` |
+| Health | admin/admin_health_tab.dart | Terminal: `status --json`, `health --json` |
 | RBAC | admin/admin_rbac_tab.dart | Role hierarchy, permission matrix, terminal tiers, permission editor |
-| Sessions | admin/admin_sessions_tab.dart | Terminal: `sessions list` |
+| Sessions | admin/admin_sessions_tab.dart | Terminal: `sessions --json` |
 
 ### Design Tokens
 

@@ -357,7 +357,7 @@ class _OnboardingWizardState extends ConsumerState<OnboardingWizard> {
                   'configure --section providers',
                   'configure --section web',
                   'channels list',
-                  'sessions list',
+                  'sessions',
                 ],
               ),
             ),
@@ -389,7 +389,7 @@ class _OnboardingWizardState extends ConsumerState<OnboardingWizard> {
         return TerminalView(
           client: client,
           showInput: true,
-          suggestedCommands: const ['status', 'models', 'sessions list', 'logs'],
+          suggestedCommands: const ['status', 'models', 'sessions', 'logs'],
         );
       },
     );

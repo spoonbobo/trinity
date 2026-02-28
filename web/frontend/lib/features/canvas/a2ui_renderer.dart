@@ -7,9 +7,131 @@ import '../../models/a2ui_models.dart';
 import '../../models/ws_frame.dart';
 import '../../core/providers.dart';
 
-final a2uiJsonlPattern = RegExp(r'```a2ui\n([\s\S]*?)```');
+/// Material icon name -> IconData lookup for the Icon component.
+final Map<String, IconData> _materialIconMap = {
+  'check': Icons.check,
+  'close': Icons.close,
+  'add': Icons.add,
+  'remove': Icons.remove,
+  'delete': Icons.delete,
+  'edit': Icons.edit,
+  'search': Icons.search,
+  'settings': Icons.settings,
+  'home': Icons.home,
+  'star': Icons.star,
+  'star_border': Icons.star_border,
+  'favorite': Icons.favorite,
+  'favorite_border': Icons.favorite_border,
+  'info': Icons.info,
+  'warning': Icons.warning,
+  'error': Icons.error,
+  'help': Icons.help,
+  'visibility': Icons.visibility,
+  'visibility_off': Icons.visibility_off,
+  'arrow_back': Icons.arrow_back,
+  'arrow_forward': Icons.arrow_forward,
+  'arrow_upward': Icons.arrow_upward,
+  'arrow_downward': Icons.arrow_downward,
+  'expand_more': Icons.expand_more,
+  'expand_less': Icons.expand_less,
+  'chevron_right': Icons.chevron_right,
+  'chevron_left': Icons.chevron_left,
+  'menu': Icons.menu,
+  'more_vert': Icons.more_vert,
+  'more_horiz': Icons.more_horiz,
+  'refresh': Icons.refresh,
+  'copy': Icons.copy,
+  'content_copy': Icons.content_copy,
+  'content_paste': Icons.content_paste,
+  'send': Icons.send,
+  'download': Icons.download,
+  'upload': Icons.upload,
+  'share': Icons.share,
+  'link': Icons.link,
+  'open_in_new': Icons.open_in_new,
+  'play_arrow': Icons.play_arrow,
+  'pause': Icons.pause,
+  'stop': Icons.stop,
+  'skip_next': Icons.skip_next,
+  'skip_previous': Icons.skip_previous,
+  'person': Icons.person,
+  'people': Icons.people,
+  'group': Icons.group,
+  'notifications': Icons.notifications,
+  'email': Icons.email,
+  'phone': Icons.phone,
+  'chat': Icons.chat,
+  'message': Icons.message,
+  'calendar_today': Icons.calendar_today,
+  'schedule': Icons.schedule,
+  'access_time': Icons.access_time,
+  'location_on': Icons.location_on,
+  'map': Icons.map,
+  'cloud': Icons.cloud,
+  'cloud_upload': Icons.cloud_upload,
+  'cloud_download': Icons.cloud_download,
+  'folder': Icons.folder,
+  'file_copy': Icons.file_copy,
+  'attach_file': Icons.attach_file,
+  'photo': Icons.photo,
+  'camera': Icons.camera_alt,
+  'mic': Icons.mic,
+  'volume_up': Icons.volume_up,
+  'volume_off': Icons.volume_off,
+  'brightness_high': Icons.brightness_high,
+  'brightness_low': Icons.brightness_low,
+  'wifi': Icons.wifi,
+  'bluetooth': Icons.bluetooth,
+  'battery_full': Icons.battery_full,
+  'power': Icons.power,
+  'lock': Icons.lock,
+  'lock_open': Icons.lock_open,
+  'vpn_key': Icons.vpn_key,
+  'security': Icons.security,
+  'verified': Icons.verified,
+  'thumb_up': Icons.thumb_up,
+  'thumb_down': Icons.thumb_down,
+  'code': Icons.code,
+  'terminal': Icons.terminal,
+  'bug_report': Icons.bug_report,
+  'build': Icons.build,
+  'dashboard': Icons.dashboard,
+  'analytics': Icons.analytics,
+  'bar_chart': Icons.bar_chart,
+  'pie_chart': Icons.pie_chart,
+  'show_chart': Icons.show_chart,
+  'trending_up': Icons.trending_up,
+  'trending_down': Icons.trending_down,
+  'data_usage': Icons.data_usage,
+  'memory': Icons.memory,
+  'speed': Icons.speed,
+  'grid_view': Icons.grid_view,
+  'list': Icons.list,
+  'view_list': Icons.view_list,
+  'table_chart': Icons.table_chart,
+  'check_circle': Icons.check_circle,
+  'cancel': Icons.cancel,
+  'do_not_disturb': Icons.do_not_disturb,
+  'task_alt': Icons.task_alt,
+  'pending': Icons.pending,
+  'hourglass_empty': Icons.hourglass_empty,
+  'sync': Icons.sync,
+  'autorenew': Icons.autorenew,
+  'rocket_launch': Icons.rocket_launch,
+  'lightbulb': Icons.lightbulb,
+  'psychology': Icons.psychology,
+  'smart_toy': Icons.smart_toy,
+};
 
-/// Renders A2UI v0.8 surfaces pushed by the agent via inline JSONL in chat.
+/// Renders A2UI v0.8 surfaces pushed by the agent.
+///
+/// Optimized:
+/// - Proper StatefulWidget extraction for input components (no state reset)
+/// - TextEditingController lifecycle management
+/// - Batched setState (single rebuild per event)
+/// - ValueKey on all dynamic children for correct reconciliation
+/// - ShellTokens for theme-aware colors
+/// - List template per-item data scoping
 class A2UIRendererPanel extends ConsumerStatefulWidget {
   const A2UIRendererPanel({super.key});
 
@@ -26,66 +148,39 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final client = ref.read(gatewayClientProvider);
-      _chatSub = client.events.listen(_handleEvent);
+      // #9 + #11: Filter to only a2ui/canvas events (removed dead chat regex path)
+      _chatSub = client.events
+          .where((e) => e.event == 'a2ui' || e.event == 'canvas')
+          .listen(_handleEvent);
     });
   }
 
   void _handleEvent(WsEvent event) {
     try {
-      _handleEventInner(event);
+      _handleA2UIEvent(event);
     } catch (e, st) {
       debugPrint('[A2UI] error handling event: $e\n$st');
     }
   }
 
-  void _handleEventInner(WsEvent event) {
-    if (event.event == 'a2ui' || event.event == 'canvas') {
-      _handleA2UIEvent(event);
-      return;
-    }
-
-    if (event.event != 'chat') return;
-    final state = event.payload['state'] as String?;
-    if (state != 'final') return;
-
-    final message = event.payload['message'];
-    if (message is! Map<String, dynamic>) return;
-    final contentList = message['content'];
-    if (contentList is! List || contentList.isEmpty) return;
-    final first = contentList[0];
-    if (first is! Map<String, dynamic>) return;
-    final text = first['text'] as String? ?? '';
-
-    final match = a2uiJsonlPattern.firstMatch(text);
-    if (match == null) return;
-
-    final jsonlBlock = match.group(1) ?? '';
-    for (final line in jsonlBlock.split('\n')) {
-      if (line.trim().isEmpty) continue;
-      try {
-        final parsed = jsonDecode(line.trim()) as Map<String, dynamic>;
-        _handleA2UIEvent(WsEvent(event: 'a2ui', payload: parsed));
-      } catch (_) {}
-    }
-  }
-
+  // #4: Batched setState -- all mutations in a single setState call
   void _handleA2UIEvent(WsEvent event) {
     final payload = event.payload;
+    bool needsRebuild = false;
 
     if (payload.containsKey('surfaceUpdate')) {
       final raw = payload['surfaceUpdate'];
       if (raw is Map<String, dynamic>) {
         try {
           final update = SurfaceUpdate.fromJson(raw);
-          setState(() {
-            final surface = _surfaces.putIfAbsent(
-              update.surfaceId,
-              () => A2UISurface(surfaceId: update.surfaceId, components: []),
-            );
-            surface.components
-              ..clear()
-              ..addAll(update.components);
-          });
+          final surface = _surfaces.putIfAbsent(
+            update.surfaceId,
+            () => A2UISurface(surfaceId: update.surfaceId),
+          );
+          for (final comp in update.components) {
+            surface.components[comp.id] = comp;
+          }
+          needsRebuild = true;
         } catch (e) {
           debugPrint('[A2UI] bad surfaceUpdate: $e');
         }
@@ -97,9 +192,14 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
       if (raw is Map<String, dynamic>) {
         try {
           final begin = BeginRendering.fromJson(raw);
-          setState(() {
-            _surfaces[begin.surfaceId]?.rootId = begin.root;
-          });
+          final surface = _surfaces[begin.surfaceId];
+          if (surface != null) {
+            surface.rootId = begin.root;
+            if (begin.catalogId != null) {
+              surface.catalogId = begin.catalogId;
+            }
+            needsRebuild = true;
+          }
         } catch (e) {
           debugPrint('[A2UI] bad beginRendering: $e');
         }
@@ -107,8 +207,20 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
     }
 
     if (payload.containsKey('dataModelUpdate')) {
-      // Data model updates would refresh bound data in components
-      setState(() {});
+      final raw = payload['dataModelUpdate'];
+      if (raw is Map<String, dynamic>) {
+        try {
+          final update = DataModelUpdate.fromJson(raw);
+          final surface = _surfaces.putIfAbsent(
+            update.surfaceId,
+            () => A2UISurface(surfaceId: update.surfaceId),
+          );
+          surface.mergeContents(update.path, update.contents);
+          needsRebuild = true;
+        } catch (e) {
+          debugPrint('[A2UI] bad dataModelUpdate: $e');
+        }
+      }
     }
 
     if (payload.containsKey('deleteSurface')) {
@@ -116,14 +228,40 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
       if (raw is Map<String, dynamic>) {
         try {
           final del = DeleteSurface.fromJson(raw);
-          setState(() {
-            _surfaces.remove(del.surfaceId);
-          });
+          if (_surfaces.remove(del.surfaceId) != null) {
+            needsRebuild = true;
+          }
         } catch (e) {
           debugPrint('[A2UI] bad deleteSurface: $e');
         }
       }
     }
+
+    if (needsRebuild) setState(() {});
+  }
+
+  /// Send a structured userAction back to the agent.
+  void _sendUserAction(String actionName, A2UISurface surface,
+      String sourceComponentId, Map<String, dynamic>? actionContext) {
+    final resolvedContext = <String, dynamic>{};
+    if (actionContext != null) {
+      for (final entry in actionContext.entries) {
+        resolvedContext[entry.key] =
+            resolveBoundValue(entry.value, surface) ?? entry.value;
+      }
+    }
+
+    final action = UserAction(
+      name: actionName,
+      surfaceId: surface.surfaceId,
+      sourceComponentId: sourceComponentId,
+      timestamp: DateTime.now().toUtc().toIso8601String(),
+      context: resolvedContext,
+    );
+
+    final client = ref.read(gatewayClientProvider);
+    final payload = jsonEncode(action.toJson());
+    client.sendChatMessage('/a2ui-action $payload');
   }
 
   @override
@@ -147,76 +285,133 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
       );
     }
 
+    // #5: ValueKey on each surface
     return ListView(
       padding: const EdgeInsets.all(12),
       children: _surfaces.values.map((surface) {
         if (surface.rootId == null) return const SizedBox.shrink();
-        final rootComponent = surface.components.where(
-          (c) => c.id == surface.rootId,
-        );
-        if (rootComponent.isEmpty) return const SizedBox.shrink();
-        return _renderComponent(
-          rootComponent.first,
-          surface.components,
-          theme,
+        final rootComponent = surface.components[surface.rootId];
+        if (rootComponent == null) return const SizedBox.shrink();
+        return KeyedSubtree(
+          key: ValueKey('surface-${surface.surfaceId}'),
+          child: _renderComponent(rootComponent, surface, theme, t),
         );
       }).toList(),
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Component rendering -- all methods now receive ShellTokens
+  // ---------------------------------------------------------------------------
+
   Widget _renderComponent(
     A2UIComponent component,
-    List<A2UIComponent> allComponents,
+    A2UISurface surface,
     ThemeData theme,
+    ShellTokens t,
   ) {
+    // #5: Wrap every component with a ValueKey for stable reconciliation
+    final Widget child;
     switch (component.type) {
       case 'Text':
-        return _renderText(component, theme);
+        child = _renderText(component, surface, theme);
+        break;
       case 'Column':
-        return _renderColumn(component, allComponents, theme);
+        child = _renderColumn(component, surface, theme, t);
+        break;
       case 'Row':
-        return _renderRow(component, allComponents, theme);
+        child = _renderRow(component, surface, theme, t);
+        break;
       case 'Button':
-        return _renderButton(component, theme);
+        child = _renderButton(component, surface, theme);
+        break;
       case 'Card':
-        return _renderCard(component, allComponents, theme);
+        child = _renderCard(component, surface, theme, t);
+        break;
       case 'Image':
-        return _renderImage(component);
+        child = _renderImage(component, surface, t);
+        break;
+      // #1+#2: Input components are proper StatefulWidgets
       case 'TextField':
-        return _renderTextField(component, theme);
+        child = _A2UITextField(
+          key: ValueKey('tf-${component.id}'),
+          component: component,
+          surface: surface,
+          theme: theme,
+        );
+        break;
+      case 'Icon':
+        child = _renderIcon(component, surface, theme);
+        break;
+      case 'CheckBox':
+        child = _A2UICheckBox(
+          key: ValueKey('cb-${component.id}'),
+          component: component,
+          surface: surface,
+          theme: theme,
+          tokens: t,
+        );
+        break;
+      case 'Modal':
+        child = _renderModal(component, surface, theme, t);
+        break;
+      case 'Tabs':
+        child = _renderTabs(component, surface, theme, t);
+        break;
+      case 'List':
+        child = _renderList(component, surface, theme, t);
+        break;
       case 'Slider':
-        return _renderSlider(component);
+        child = _A2UISlider(
+          key: ValueKey('sl-${component.id}'),
+          component: component,
+          surface: surface,
+          tokens: t,
+        );
+        break;
       case 'Toggle':
-        return _renderToggle(component);
+        child = _A2UIToggle(
+          key: ValueKey('tg-${component.id}'),
+          component: component,
+          surface: surface,
+          tokens: t,
+        );
+        break;
       case 'Progress':
-        return _renderProgress(component, theme);
+        child = _renderProgress(component, surface, theme, t);
+        break;
       case 'Divider':
-        return const Divider(color: Color(0xFF2A2A2A), height: 16);
+        child = _renderDivider(component, t);
+        break;
       case 'Spacer':
-        return SizedBox(
+        child = SizedBox(
           height: (component.props['height'] as num?)?.toDouble() ?? 16,
         );
+        break;
       default:
-        return Container(
+        child = Container(
           padding: const EdgeInsets.all(8),
           margin: const EdgeInsets.symmetric(vertical: 4),
           decoration: BoxDecoration(
-            border: Border.all(color: const Color(0xFF2A2A2A)),
-            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: t.border),
           ),
           child: Text(
             '[${component.type}]',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFF6B6B6B),
-            ),
+            style: theme.textTheme.bodyMedium?.copyWith(color: t.fgMuted),
           ),
         );
     }
+
+    return KeyedSubtree(
+      key: ValueKey(component.id),
+      child: child,
+    );
   }
 
-  Widget _renderText(A2UIComponent component, ThemeData theme) {
-    final text = _resolveText(component.props['text']);
-    final hint = component.props['usageHint'] as String?;
+  // --- Text ---
+  Widget _renderText(A2UIComponent c, A2UISurface surface, ThemeData theme) {
+    final text = resolveBoundString(c.props['text'], surface);
+    final hint = c.props['usageHint'] as String?;
 
     TextStyle? style;
     switch (hint) {
@@ -225,6 +420,15 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
         break;
       case 'h2':
         style = theme.textTheme.titleLarge?.copyWith(fontSize: 16);
+        break;
+      case 'h3':
+        style = theme.textTheme.titleMedium;
+        break;
+      case 'h4':
+        style = theme.textTheme.titleSmall;
+        break;
+      case 'h5':
+        style = theme.textTheme.labelLarge;
         break;
       case 'caption':
       case 'label':
@@ -240,80 +444,113 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
     );
   }
 
-  Widget _renderColumn(
-    A2UIComponent component,
-    List<A2UIComponent> all,
-    ThemeData theme,
-  ) {
-    final childIds = _resolveChildIds(component.props['children']);
-    final children = childIds
-        .map((id) => all.where((c) => c.id == id))
-        .where((matches) => matches.isNotEmpty)
-        .map((matches) => _renderComponent(matches.first, all, theme))
-        .toList();
+  // --- Column ---
+  Widget _renderColumn(A2UIComponent c, A2UISurface surface, ThemeData theme, ShellTokens t) {
+    final childIds = _resolveChildIds(c.props['children']);
+    final distribution = c.props['distribution'] as String?;
+    final alignment = c.props['alignment'] as String?;
+
+    final children = _buildChildren(childIds, surface, theme, t);
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: _parseCrossAxisAlignment(alignment) ?? CrossAxisAlignment.start,
+      mainAxisAlignment: _parseMainAxisAlignment(distribution) ?? MainAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: children,
     );
   }
 
-  Widget _renderRow(
-    A2UIComponent component,
-    List<A2UIComponent> all,
-    ThemeData theme,
-  ) {
-    final childIds = _resolveChildIds(component.props['children']);
-    final children = childIds
-        .map((id) => all.where((c) => c.id == id))
-        .where((matches) => matches.isNotEmpty)
-        .map((matches) => _renderComponent(matches.first, all, theme))
-        .toList();
+  // --- Row ---
+  Widget _renderRow(A2UIComponent c, A2UISurface surface, ThemeData theme, ShellTokens t) {
+    final childIds = _resolveChildIds(c.props['children']);
+    final distribution = c.props['distribution'] as String?;
+    final alignment = c.props['alignment'] as String?;
+
+    final children = <Widget>[];
+    for (final id in childIds) {
+      final comp = surface.components[id];
+      if (comp == null) continue;
+      final widget = _renderComponent(comp, surface, theme, t);
+      final flex = comp.weight?.toInt() ?? 1;
+      children.add(Flexible(key: ValueKey('flex-$id'), flex: flex, child: widget));
+    }
 
     return Row(
-      children: children.map((c) => Flexible(child: c)).toList(),
+      mainAxisAlignment: _parseMainAxisAlignment(distribution) ?? MainAxisAlignment.start,
+      crossAxisAlignment: _parseCrossAxisAlignment(alignment) ?? CrossAxisAlignment.center,
+      children: children,
     );
   }
 
-  Widget _renderButton(A2UIComponent component, ThemeData theme) {
-    final label = _resolveText(component.props['label'] ?? component.props['text']);
-    final action = component.props['action'] as String?;
+  // --- Button ---
+  Widget _renderButton(A2UIComponent c, A2UISurface surface, ThemeData theme) {
+    final actionProp = c.props['action'];
+    String? actionName;
+    Map<String, dynamic>? actionContext;
+
+    if (actionProp is Map<String, dynamic>) {
+      actionName = actionProp['name'] as String?;
+      final ctxRaw = actionProp['context'];
+      if (ctxRaw is Map<String, dynamic>) {
+        actionContext = ctxRaw;
+      } else if (ctxRaw is List) {
+        actionContext = {};
+        for (final entry in ctxRaw) {
+          if (entry is Map<String, dynamic>) {
+            final key = entry['key'] as String?;
+            if (key != null) {
+              actionContext[key] = entry['value'] ?? entry;
+            }
+          }
+        }
+      }
+    } else if (actionProp is String) {
+      actionName = actionProp;
+    }
+
+    final primary = c.props['primary'] as bool? ?? false;
+
+    final childId = c.props['child'] as String?;
+    Widget? childWidget;
+    if (childId != null && surface.components.containsKey(childId)) {
+      childWidget = _renderComponent(
+          surface.components[childId]!, surface, theme, ShellTokens.of(context));
+    }
+    final label = resolveBoundString(
+        c.props['label'] ?? c.props['text'], surface);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: ElevatedButton(
-        onPressed: action != null
-            ? () {
-                // Send button action back to the agent
-                ref.read(gatewayClientProvider).sendChatMessage(
-                      '/action $action',
-                    );
-              }
+        onPressed: actionName != null
+            ? () => _sendUserAction(actionName!, surface, c.id, actionContext)
             : null,
         style: ElevatedButton.styleFrom(
-          backgroundColor: theme.colorScheme.primary,
-          foregroundColor: theme.colorScheme.onPrimary,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+          backgroundColor: primary
+              ? theme.colorScheme.primary
+              : theme.colorScheme.surface,
+          foregroundColor: primary
+              ? theme.colorScheme.onPrimary
+              : theme.colorScheme.onSurface,
+          shape: const RoundedRectangleBorder(),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         ),
-        child: Text(label),
+        child: childWidget ?? Text(label),
       ),
     );
   }
 
-  Widget _renderCard(
-    A2UIComponent component,
-    List<A2UIComponent> all,
-    ThemeData theme,
-  ) {
-    final childIds = _resolveChildIds(component.props['children']);
-    final children = childIds
-        .map((id) => all.where((c) => c.id == id))
-        .where((matches) => matches.isNotEmpty)
-        .map((matches) => _renderComponent(matches.first, all, theme))
-        .toList();
+  // --- Card ---
+  Widget _renderCard(A2UIComponent c, A2UISurface surface, ThemeData theme, ShellTokens t) {
+    final singleChild = c.props['child'] as String?;
+    List<Widget> children;
+
+    if (singleChild != null && surface.components.containsKey(singleChild)) {
+      children = [_renderComponent(surface.components[singleChild]!, surface, theme, t)];
+    } else {
+      final childIds = _resolveChildIds(c.props['children']);
+      children = _buildChildren(childIds, surface, theme, t);
+    }
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
@@ -327,92 +564,203 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
     );
   }
 
-  Widget _renderImage(A2UIComponent component) {
-    final url = component.props['url'] as String? ??
-        component.props['src'] as String? ??
-        '';
+  // --- Image --- #8: use ShellTokens for error fallback colors
+  Widget _renderImage(A2UIComponent c, A2UISurface surface, ShellTokens t) {
+    final url = resolveBoundString(c.props['url'] ?? c.props['src'], surface);
     if (url.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.network(url, fit: BoxFit.contain),
+      child: Image.network(url, fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => Container(
+          padding: const EdgeInsets.all(8),
+          color: t.surfaceCard,
+          child: Text('[Image failed to load]',
+              style: TextStyle(color: t.fgMuted, fontSize: 12)),
+        ),
       ),
     );
   }
 
-  Widget _renderTextField(A2UIComponent component, ThemeData theme) {
-    final hint = component.props['placeholder'] as String? ?? '';
+  // --- Icon ---
+  Widget _renderIcon(A2UIComponent c, A2UISurface surface, ThemeData theme) {
+    final name = resolveBoundString(c.props['name'], surface);
+    final iconData = _materialIconMap[name] ?? Icons.help_outline;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: TextField(
-        decoration: InputDecoration(hintText: hint),
-        style: theme.textTheme.bodyLarge,
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Icon(iconData, color: theme.colorScheme.onSurface, size: 20),
+    );
+  }
+
+  // --- Modal ---
+  Widget _renderModal(A2UIComponent c, A2UISurface surface, ThemeData theme, ShellTokens t) {
+    final entryPointChildId = c.props['entryPointChild'] as String?;
+    final contentChildId = c.props['contentChild'] as String?;
+
+    Widget entryPoint = const SizedBox.shrink();
+    if (entryPointChildId != null && surface.components.containsKey(entryPointChildId)) {
+      entryPoint = _renderComponent(surface.components[entryPointChildId]!, surface, theme, t);
+    }
+
+    return GestureDetector(
+      onTap: () {
+        if (contentChildId != null && surface.components.containsKey(contentChildId)) {
+          showDialog(
+            context: context,
+            builder: (dialogContext) {
+              return Dialog(
+                shape: const RoundedRectangleBorder(),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: SingleChildScrollView(
+                    child: _renderComponent(
+                        surface.components[contentChildId]!, surface, theme, t),
+                  ),
+                ),
+              );
+            },
+          );
+        }
+      },
+      child: entryPoint,
+    );
+  }
+
+  // --- Tabs ---
+  Widget _renderTabs(A2UIComponent c, A2UISurface surface, ThemeData theme, ShellTokens t) {
+    final tabItems = c.props['tabItems'] as List<dynamic>? ?? [];
+    if (tabItems.isEmpty) return const SizedBox.shrink();
+
+    final tabs = <Tab>[];
+    final tabChildren = <Widget>[];
+
+    for (int i = 0; i < tabItems.length; i++) {
+      final item = tabItems[i];
+      if (item is! Map<String, dynamic>) continue;
+      final title = resolveBoundString(item['title'], surface);
+      final childId = item['child'] as String?;
+      tabs.add(Tab(key: ValueKey('tab-$i'), text: title));
+      if (childId != null && surface.components.containsKey(childId)) {
+        tabChildren.add(KeyedSubtree(
+          key: ValueKey('tab-content-$childId'),
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: _renderComponent(surface.components[childId]!, surface, theme, t),
+          ),
+        ));
+      } else {
+        tabChildren.add(const SizedBox.shrink());
+      }
+    }
+
+    return DefaultTabController(
+      length: tabs.length,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TabBar(
+            tabs: tabs,
+            labelColor: theme.colorScheme.primary,
+            unselectedLabelColor: t.fgMuted,
+            indicatorColor: theme.colorScheme.primary,
+          ),
+          SizedBox(
+            height: 300,
+            child: TabBarView(children: tabChildren),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _renderSlider(A2UIComponent component) {
-    final min = (component.props['min'] as num?)?.toDouble() ?? 0;
-    final max = (component.props['max'] as num?)?.toDouble() ?? 100;
-    final value = (component.props['value'] as num?)?.toDouble() ?? min;
-    return StatefulBuilder(
-      builder: (context, setSliderState) {
-        var current = value;
-        return Slider(
-          value: current.clamp(min, max),
-          min: min,
-          max: max,
-          activeColor: const Color(0xFF6EE7B7),
-          onChanged: (v) => setSliderState(() => current = v),
-        );
-      },
+  // --- List (scrollable, with template support) ---
+  // #6: per-item data scoping for template rendering
+  Widget _renderList(A2UIComponent c, A2UISurface surface, ThemeData theme, ShellTokens t) {
+    final childrenProp = c.props['children'];
+
+    if (childrenProp is Map<String, dynamic> && childrenProp.containsKey('template')) {
+      final template = childrenProp['template'] as Map<String, dynamic>;
+      final dataBinding = template['dataBinding'] as String?;
+      final templateId = template['componentId'] as String?;
+
+      if (dataBinding != null && templateId != null) {
+        final listData = surface.getPath(dataBinding);
+        if (listData is List) {
+          return SizedBox(
+            height: 300,
+            child: ListView.builder(
+              itemCount: listData.length,
+              itemBuilder: (context, index) {
+                final templateComp = surface.components[templateId];
+                if (templateComp == null) return const SizedBox.shrink();
+                // Scope per-item data: set /_current to this item's data
+                // so template components can bind to /_current/fieldName
+                final item = listData[index];
+                if (item is Map<String, dynamic>) {
+                  surface.setPath('_current', item);
+                  surface.setPath('_index', index);
+                }
+                return KeyedSubtree(
+                  key: ValueKey('list-item-$index'),
+                  child: _renderComponent(templateComp, surface, theme, t),
+                );
+              },
+            ),
+          );
+        }
+      }
+      return const SizedBox.shrink();
+    }
+
+    final childIds = _resolveChildIds(childrenProp);
+    final children = _buildChildren(childIds, surface, theme, t);
+    return SizedBox(
+      height: 300,
+      child: ListView(children: children),
     );
   }
 
-  Widget _renderToggle(A2UIComponent component) {
-    final value = component.props['value'] as bool? ?? false;
-    final label = _resolveText(component.props['label']);
-    return StatefulBuilder(
-      builder: (context, setToggleState) {
-        var current = value;
-        return SwitchListTile(
-          value: current,
-          title: Text(label),
-          activeColor: const Color(0xFF6EE7B7),
-          onChanged: (v) => setToggleState(() => current = v),
-          contentPadding: EdgeInsets.zero,
-        );
-      },
-    );
-  }
-
-  Widget _renderProgress(A2UIComponent component, ThemeData theme) {
-    final value = (component.props['value'] as num?)?.toDouble();
+  // --- Progress --- #8: use theme tokens
+  Widget _renderProgress(A2UIComponent c, A2UISurface surface, ThemeData theme, ShellTokens t) {
+    final value = resolveBoundNum(c.props['value'], surface)?.toDouble();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: value != null
           ? LinearProgressIndicator(
               value: value,
-              backgroundColor: const Color(0xFF2A2A2A),
+              backgroundColor: t.surfaceElevated,
               color: theme.colorScheme.primary,
             )
           : LinearProgressIndicator(
-              backgroundColor: const Color(0xFF2A2A2A),
+              backgroundColor: t.surfaceElevated,
               color: theme.colorScheme.primary,
             ),
     );
   }
 
-  String _resolveText(dynamic textProp) {
-    if (textProp == null) return '';
-    if (textProp is String) return textProp;
-    if (textProp is Map) {
-      return textProp['literalString'] as String? ??
-          textProp['value'] as String? ??
-          textProp.toString();
+  // --- Divider --- #8: use theme tokens
+  Widget _renderDivider(A2UIComponent c, ShellTokens t) {
+    final axis = c.props['axis'] as String? ?? 'horizontal';
+    if (axis == 'vertical') {
+      return SizedBox(
+        height: 40,
+        child: VerticalDivider(color: t.border, width: 16),
+      );
     }
-    return textProp.toString();
+    return Divider(color: t.border, height: 16);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  /// Build child widgets from a list of component IDs.
+  List<Widget> _buildChildren(
+      List<String> childIds, A2UISurface surface, ThemeData theme, ShellTokens t) {
+    return childIds
+        .map((id) => surface.components[id])
+        .where((c) => c != null)
+        .map((c) => _renderComponent(c!, surface, theme, t))
+        .toList();
   }
 
   List<String> _resolveChildIds(dynamic childrenProp) {
@@ -433,5 +781,277 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
       }
     }
     return [];
+  }
+
+  String? _extractPath(dynamic prop) {
+    if (prop is Map) return prop['path'] as String?;
+    return null;
+  }
+
+  MainAxisAlignment? _parseMainAxisAlignment(String? value) {
+    switch (value) {
+      case 'start': return MainAxisAlignment.start;
+      case 'center': return MainAxisAlignment.center;
+      case 'end': return MainAxisAlignment.end;
+      case 'spaceBetween': return MainAxisAlignment.spaceBetween;
+      case 'spaceAround': return MainAxisAlignment.spaceAround;
+      case 'spaceEvenly': return MainAxisAlignment.spaceEvenly;
+      default: return null;
+    }
+  }
+
+  CrossAxisAlignment? _parseCrossAxisAlignment(String? value) {
+    switch (value) {
+      case 'start': return CrossAxisAlignment.start;
+      case 'center': return CrossAxisAlignment.center;
+      case 'end': return CrossAxisAlignment.end;
+      case 'stretch': return CrossAxisAlignment.stretch;
+      default: return null;
+    }
+  }
+}
+
+// =============================================================================
+// #1+#2: Extracted StatefulWidget input components
+// Proper state management -- no reset on parent rebuild, controllers disposed
+// =============================================================================
+
+/// TextField with proper controller lifecycle and data model write-back.
+class _A2UITextField extends StatefulWidget {
+  final A2UIComponent component;
+  final A2UISurface surface;
+  final ThemeData theme;
+
+  const _A2UITextField({
+    super.key,
+    required this.component,
+    required this.surface,
+    required this.theme,
+  });
+
+  @override
+  State<_A2UITextField> createState() => _A2UITextFieldState();
+}
+
+class _A2UITextFieldState extends State<_A2UITextField> {
+  late final TextEditingController _controller;
+  String? _textPath;
+
+  @override
+  void initState() {
+    super.initState();
+    _textPath = _extractPath(widget.component.props['text']);
+    final initialValue = resolveBoundString(widget.component.props['text'], widget.surface);
+    _controller = TextEditingController(text: initialValue);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  String? _extractPath(dynamic prop) {
+    if (prop is Map) return prop['path'] as String?;
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.component;
+    final label = resolveBoundString(c.props['label'], widget.surface);
+    final placeholder = c.props['placeholder'] as String? ?? '';
+    final textFieldType = c.props['textFieldType'] as String? ?? 'shortText';
+
+    final isMultiline = textFieldType == 'longText';
+    final isObscured = textFieldType == 'obscured';
+    final keyboardType = textFieldType == 'number'
+        ? TextInputType.number
+        : textFieldType == 'date'
+            ? TextInputType.datetime
+            : isMultiline
+                ? TextInputType.multiline
+                : TextInputType.text;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: TextField(
+        controller: _controller,
+        decoration: InputDecoration(
+          hintText: placeholder,
+          labelText: label.isNotEmpty ? label : null,
+        ),
+        style: widget.theme.textTheme.bodyLarge,
+        obscureText: isObscured,
+        keyboardType: keyboardType,
+        maxLines: isMultiline ? 5 : 1,
+        onChanged: (value) {
+          if (_textPath != null) {
+            widget.surface.setPath(_textPath!, value);
+          }
+        },
+      ),
+    );
+  }
+}
+
+/// CheckBox with proper state management.
+class _A2UICheckBox extends StatefulWidget {
+  final A2UIComponent component;
+  final A2UISurface surface;
+  final ThemeData theme;
+  final ShellTokens tokens;
+
+  const _A2UICheckBox({
+    super.key,
+    required this.component,
+    required this.surface,
+    required this.theme,
+    required this.tokens,
+  });
+
+  @override
+  State<_A2UICheckBox> createState() => _A2UICheckBoxState();
+}
+
+class _A2UICheckBoxState extends State<_A2UICheckBox> {
+  late bool _current;
+  String? _valuePath;
+
+  @override
+  void initState() {
+    super.initState();
+    _valuePath = _extractPath(widget.component.props['value']);
+    _current = resolveBoundBool(widget.component.props['value'], widget.surface);
+  }
+
+  String? _extractPath(dynamic prop) {
+    if (prop is Map) return prop['path'] as String?;
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = resolveBoundString(widget.component.props['label'], widget.surface);
+    return CheckboxListTile(
+      value: _current,
+      title: Text(label, style: widget.theme.textTheme.bodyLarge),
+      activeColor: widget.tokens.accentPrimary,
+      controlAffinity: ListTileControlAffinity.leading,
+      contentPadding: EdgeInsets.zero,
+      onChanged: (v) {
+        setState(() => _current = v ?? false);
+        if (_valuePath != null) {
+          widget.surface.setPath(_valuePath!, v ?? false);
+        }
+      },
+    );
+  }
+}
+
+/// Slider with proper state management.
+class _A2UISlider extends StatefulWidget {
+  final A2UIComponent component;
+  final A2UISurface surface;
+  final ShellTokens tokens;
+
+  const _A2UISlider({
+    super.key,
+    required this.component,
+    required this.surface,
+    required this.tokens,
+  });
+
+  @override
+  State<_A2UISlider> createState() => _A2UISliderState();
+}
+
+class _A2UISliderState extends State<_A2UISlider> {
+  late double _current;
+  late double _min;
+  late double _max;
+  String? _valuePath;
+
+  @override
+  void initState() {
+    super.initState();
+    _min = (widget.component.props['min'] as num?)?.toDouble() ?? 0;
+    _max = (widget.component.props['max'] as num?)?.toDouble() ?? 100;
+    _valuePath = _extractPath(widget.component.props['value']);
+    final initial = (resolveBoundNum(widget.component.props['value'], widget.surface) ?? _min)
+        .toDouble();
+    _current = initial.clamp(_min, _max);
+  }
+
+  String? _extractPath(dynamic prop) {
+    if (prop is Map) return prop['path'] as String?;
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Slider(
+      value: _current,
+      min: _min,
+      max: _max,
+      activeColor: widget.tokens.accentPrimary,
+      onChanged: (v) {
+        setState(() => _current = v);
+        if (_valuePath != null) {
+          widget.surface.setPath(_valuePath!, v);
+        }
+      },
+    );
+  }
+}
+
+/// Toggle/Switch with proper state management.
+class _A2UIToggle extends StatefulWidget {
+  final A2UIComponent component;
+  final A2UISurface surface;
+  final ShellTokens tokens;
+
+  const _A2UIToggle({
+    super.key,
+    required this.component,
+    required this.surface,
+    required this.tokens,
+  });
+
+  @override
+  State<_A2UIToggle> createState() => _A2UIToggleState();
+}
+
+class _A2UIToggleState extends State<_A2UIToggle> {
+  late bool _current;
+  String? _valuePath;
+
+  @override
+  void initState() {
+    super.initState();
+    _valuePath = _extractPath(widget.component.props['value']);
+    _current = resolveBoundBool(widget.component.props['value'], widget.surface);
+  }
+
+  String? _extractPath(dynamic prop) {
+    if (prop is Map) return prop['path'] as String?;
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = resolveBoundString(widget.component.props['label'], widget.surface);
+    return SwitchListTile(
+      value: _current,
+      title: Text(label),
+      activeColor: widget.tokens.accentPrimary,
+      contentPadding: EdgeInsets.zero,
+      onChanged: (v) {
+        setState(() => _current = v);
+        if (_valuePath != null) {
+          widget.surface.setPath(_valuePath!, v);
+        }
+      },
+    );
   }
 }
