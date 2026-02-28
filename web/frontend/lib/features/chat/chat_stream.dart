@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/theme.dart';
 import '../../core/gateway_client.dart' as gw;
 import '../../models/ws_frame.dart';
 import '../shell/shell_page.dart';
@@ -398,40 +399,22 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final t = ShellTokens.of(context);
 
     if (_entries.isEmpty && !_agentThinking) {
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.terminal_rounded,
-              size: 48,
-              color: theme.colorScheme.primary.withOpacity(0.3),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'UNIVERSAL COMMAND CENTER',
-              style: theme.textTheme.labelSmall?.copyWith(
-                letterSpacing: 3,
-                color: const Color(0xFF3A3A3A),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Start typing or use voice to interact with the agent.',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: const Color(0xFF4A4A4A),
-              ),
-            ),
-          ],
+        child: Text(
+          'ready.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: t.fgDisabled,
+          ),
         ),
       );
     }
 
     return ListView.builder(
       controller: _scrollController,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       itemCount: _entries.length + (_agentThinking ? 1 : 0),
       itemBuilder: (context, index) {
         if (index == _entries.length && _agentThinking) {
@@ -456,25 +439,22 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
   }
 
   Widget _buildThinkingIndicator(ThemeData theme) {
+    final t = ShellTokens.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: theme.colorScheme.primary.withOpacity(0.5),
+          Text(
+            '... ',
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: t.fgTertiary,
             ),
           ),
-          const SizedBox(width: 8),
-          Text(
-            'Thinking...',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFF6B6B6B),
-              fontStyle: FontStyle.italic,
-            ),
+          SizedBox(
+            width: 8,
+            height: 14,
+            child: _CursorBlink(),
           ),
         ],
       ),
@@ -488,22 +468,22 @@ class _UserBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerRight,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.65,
-        ),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1A2A1A),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF2A4A2A)),
-        ),
-        child: SelectableText(
-          entry.content,
-          style: Theme.of(context).textTheme.bodyLarge,
+    final theme = Theme.of(context);
+    final t = ShellTokens.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: SelectableText.rich(
+        TextSpan(
+          children: [
+            TextSpan(
+              text: '> ',
+              style: theme.textTheme.bodyLarge?.copyWith(color: t.accentPrimary),
+            ),
+            TextSpan(
+              text: entry.content,
+              style: theme.textTheme.bodyLarge,
+            ),
+          ],
         ),
       ),
     );
@@ -517,100 +497,66 @@ class _AssistantBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final t = ShellTokens.of(context);
     final baseStyle = theme.textTheme.bodyLarge ?? const TextStyle();
 
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
-        decoration: BoxDecoration(
-          color: const Color(0xFF141414),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF2A2A2A)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: MarkdownBody(
-                data: entry.content,
-                selectable: true,
-                styleSheet: MarkdownStyleSheet(
-                  p: baseStyle,
-                  h1: baseStyle.copyWith(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF6EE7B7),
-                  ),
-                  h2: baseStyle.copyWith(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF6EE7B7),
-                  ),
-                  h3: baseStyle.copyWith(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  code: baseStyle.copyWith(
-                    fontSize: 13,
-                    color: const Color(0xFF6EE7B7),
-                    backgroundColor: const Color(0xFF1A1A1A),
-                  ),
-                  codeblockDecoration: BoxDecoration(
-                    color: const Color(0xFF0A0A0A),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFF2A2A2A)),
-                  ),
-                  codeblockPadding: const EdgeInsets.all(12),
-                  blockquoteDecoration: BoxDecoration(
-                    border: Border(
-                      left: BorderSide(
-                        color: const Color(0xFF3B82F6),
-                        width: 3,
-                      ),
-                    ),
-                  ),
-                  blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
-                  listBullet: baseStyle.copyWith(color: const Color(0xFF6EE7B7)),
-                  strong: baseStyle.copyWith(fontWeight: FontWeight.bold),
-                  em: baseStyle.copyWith(fontStyle: FontStyle.italic),
-                  a: baseStyle.copyWith(
-                    color: const Color(0xFF3B82F6),
-                    decoration: TextDecoration.underline,
-                  ),
-                  tableHead: baseStyle.copyWith(fontWeight: FontWeight.bold),
-                  tableBorder: TableBorder.all(color: const Color(0xFF2A2A2A)),
-                  tableHeadAlign: TextAlign.left,
-                  tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  horizontalRuleDecoration: BoxDecoration(
-                    border: Border(
-                      top: BorderSide(color: const Color(0xFF2A2A2A)),
-                    ),
-                  ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Flexible(
+            child: MarkdownBody(
+              data: entry.content,
+              selectable: true,
+              styleSheet: MarkdownStyleSheet(
+                p: baseStyle,
+                h1: baseStyle.copyWith(fontSize: 16, fontWeight: FontWeight.bold, color: t.fgPrimary),
+                h2: baseStyle.copyWith(fontSize: 15, fontWeight: FontWeight.bold, color: t.fgPrimary),
+                h3: baseStyle.copyWith(fontSize: 14, fontWeight: FontWeight.bold),
+                code: baseStyle.copyWith(fontSize: 13, color: t.accentPrimary, backgroundColor: t.surfaceCodeInline),
+                codeblockDecoration: BoxDecoration(
+                  color: t.surfaceBase,
+                  border: Border(left: BorderSide(color: t.border, width: 2)),
                 ),
-                onTapLink: (text, href, title) {
-                  if (href != null) {
-                    Clipboard.setData(ClipboardData(text: href));
-                  }
-                },
+                codeblockPadding: const EdgeInsets.only(left: 12, top: 8, bottom: 8, right: 8),
+                blockquoteDecoration: BoxDecoration(
+                  border: Border(left: BorderSide(color: t.fgDisabled, width: 2)),
+                ),
+                blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
+                listBullet: baseStyle.copyWith(color: t.fgTertiary),
+                strong: baseStyle.copyWith(fontWeight: FontWeight.bold),
+                em: baseStyle.copyWith(fontStyle: FontStyle.italic),
+                a: baseStyle.copyWith(
+                  color: t.accentPrimary,
+                  decoration: TextDecoration.underline,
+                  decorationColor: t.accentPrimaryMuted,
+                ),
+                tableHead: baseStyle.copyWith(fontWeight: FontWeight.bold),
+                tableBorder: TableBorder.all(color: t.border, width: 0.5),
+                tableHeadAlign: TextAlign.left,
+                tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                horizontalRuleDecoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: t.border, width: 0.5)),
+                ),
+              ),
+              onTapLink: (text, href, title) {
+                if (href != null) {
+                  Clipboard.setData(ClipboardData(text: href));
+                }
+              },
+            ),
+          ),
+          if (entry.isStreaming)
+            Padding(
+              padding: const EdgeInsets.only(left: 2, top: 3),
+              child: SizedBox(
+                width: 8,
+                height: 14,
+                child: _CursorBlink(),
               ),
             ),
-            if (entry.isStreaming)
-              Padding(
-                padding: const EdgeInsets.only(left: 4),
-                child: SizedBox(
-                  width: 8,
-                  height: 14,
-                  child: _CursorBlink(),
-                ),
-              ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -644,12 +590,13 @@ class _CursorBlinkState extends State<_CursorBlink>
 
   @override
   Widget build(BuildContext context) {
+    final t = ShellTokens.of(context);
     return FadeTransition(
       opacity: _opacity,
       child: Container(
-        width: 2,
+        width: 7,
         height: 14,
-        color: const Color(0xFF6EE7B7),
+        color: t.accentPrimary.withOpacity(0.6),
       ),
     );
   }
@@ -662,50 +609,31 @@ class _ToolCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F1520),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFF1E3A5F)),
-      ),
+    final t = ShellTokens.of(context);
+    final prefix = entry.isStreaming ? '~ ' : '  ';
+    final nameColor = entry.isStreaming ? t.fgTertiary : t.fgMuted;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 1),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(
-                entry.isStreaming
-                    ? Icons.hourglass_top_rounded
-                    : Icons.check_circle_outline_rounded,
-                size: 14,
-                color: entry.isStreaming
-                    ? const Color(0xFFFBBF24)
-                    : const Color(0xFF6EE7B7),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                entry.toolName ?? 'tool',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: const Color(0xFF3B82F6),
-                  fontWeight: FontWeight.w700,
+          Text(
+            '$prefix${entry.toolName ?? 'tool'}',
+            style: theme.textTheme.labelSmall?.copyWith(color: nameColor),
+          ),
+          if (entry.content.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 16),
+              child: SelectableText(
+                entry.content.length > 300
+                    ? '${entry.content.substring(0, 300)}...'
+                    : entry.content,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontSize: 12,
+                  color: t.fgTertiary,
                 ),
               ),
-            ],
-          ),
-          if (entry.content.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            SelectableText(
-              entry.content.length > 500
-                  ? '${entry.content.substring(0, 500)}...'
-                  : entry.content,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontSize: 11,
-                color: const Color(0xFF8B8B8B),
-              ),
             ),
-          ],
         ],
       ),
     );
@@ -718,13 +646,13 @@ class _SystemMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = ShellTokens.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 1),
       child: Text(
         entry.content,
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFF4A4A4A),
-              fontStyle: FontStyle.italic,
+              color: t.fgDisabled,
             ),
       ),
     );

@@ -11,8 +11,6 @@ services:
       - "18789:18789"
     volumes:
       - openclaw-data:/home/node/.openclaw
-      - ./skills:/home/node/.openclaw/skills
-      - ./agents:/home/node/.openclaw/agents
     env_file:
       - .env
     environment:
@@ -26,12 +24,31 @@ services:
     networks:
       - trinity
 
+  terminal-proxy:
+    build:
+      context: ./terminal-proxy
+      dockerfile: Dockerfile
+    container_name: trinity-terminal-proxy
+    restart: unless-stopped
+    environment:
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - OPENCLAW_CONTAINER_NAME=trinity-openclaw
+      - TERMINAL_PROXY_PORT=18790
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      openclaw-gateway:
+        condition: service_healthy
+    networks:
+      - trinity
+
   frontend-builder:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
         GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+        TERMINAL_WS_URL: ws://localhost/terminal/
     container_name: trinity-flutter-builder
     volumes:
       - flutter-build:/output
@@ -50,6 +67,8 @@ services:
     depends_on:
       openclaw-gateway:
         condition: service_healthy
+      terminal-proxy:
+        condition: service_started
     networks:
       - trinity
 

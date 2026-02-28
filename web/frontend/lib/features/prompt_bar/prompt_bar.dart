@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/theme.dart';
 import '../shell/shell_page.dart';
 import 'voice_input.dart';
 
@@ -70,13 +71,13 @@ class _PromptBarState extends ConsumerState<PromptBar> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final t = ShellTokens.of(context);
     final isListening = _voiceController.isListening;
 
     return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
-        color: Color(0xFF0F0F0F),
-        border: Border(top: BorderSide(color: Color(0xFF2A2A2A))),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: t.border, width: 0.5)),
       ),
       child: SafeArea(
         top: false,
@@ -85,93 +86,59 @@ class _PromptBarState extends ConsumerState<PromptBar> {
           children: [
             if (isListening && _voiceController.transcript.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(
-                  _voiceController.transcript,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: const Color(0xFF6EE7B7),
-                    fontStyle: FontStyle.italic,
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    _voiceController.transcript,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: t.fgTertiary,
+                    ),
                   ),
                 ),
               ),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                // Text input
+                Text(
+                  '> ',
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: widget.enabled ? t.accentPrimary : t.fgDisabled,
+                  ),
+                ),
                 Expanded(
                   child: TextField(
                     controller: _controller,
                     focusNode: _focusNode,
                     enabled: widget.enabled && !_sending,
-                    maxLines: 3,
+                    maxLines: 5,
                     minLines: 1,
                     textInputAction: TextInputAction.send,
                     style: theme.textTheme.bodyLarge,
                     decoration: InputDecoration(
-                      hintText: widget.enabled
-                          ? 'Ask anything...'
-                          : 'Connecting to gateway...',
+                      hintText: widget.enabled ? '' : 'connecting...',
+                      contentPadding: EdgeInsets.zero,
+                      isDense: true,
+                      border: InputBorder.none,
                     ),
                     onSubmitted: (_) => _send(),
                   ),
                 ),
-                const SizedBox(width: 8),
-                // Voice button
                 if (_voiceController.isAvailable)
-                  _ActionButton(
-                    icon: isListening ? Icons.stop_rounded : Icons.mic_rounded,
-                    color: isListening
-                        ? const Color(0xFFEF4444)
-                        : const Color(0xFF6EE7B7),
+                  GestureDetector(
                     onTap: _toggleVoice,
-                    tooltip: isListening ? 'Stop listening' : 'Voice input',
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 8, bottom: 2),
+                      child: Icon(
+                        isListening ? Icons.stop_rounded : Icons.mic_none_rounded,
+                        size: 16,
+                        color: isListening ? t.statusError : t.fgMuted,
+                      ),
+                    ),
                   ),
-                const SizedBox(width: 4),
-                // Send button
-                _ActionButton(
-                  icon: _sending
-                      ? Icons.hourglass_top_rounded
-                      : Icons.arrow_upward_rounded,
-                  color: const Color(0xFF6EE7B7),
-                  onTap: _sending ? null : _send,
-                  tooltip: 'Send',
-                ),
               ],
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ActionButton extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final VoidCallback? onTap;
-  final String tooltip;
-
-  const _ActionButton({
-    required this.icon,
-    required this.color,
-    this.onTap,
-    required this.tooltip,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, size: 18, color: color),
         ),
       ),
     );

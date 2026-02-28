@@ -3,11 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/gateway_client.dart' as gw;
 import '../../core/auth.dart';
+import '../../core/terminal_client.dart';
+import '../../core/theme.dart';
 import '../../models/ws_frame.dart';
+import '../../main.dart' show themeModeProvider;
 import '../prompt_bar/prompt_bar.dart';
 import '../chat/chat_stream.dart';
 import '../canvas/a2ui_renderer.dart';
 import '../governance/approval_panel.dart';
+import '../onboarding/onboarding_wizard.dart';
+import '../catalog/skills_cron_dialog.dart';
 
 final _sharedDevice = DeviceIdentity.generate();
 final _sharedAuth = GatewayAuth(
@@ -21,11 +26,18 @@ const _wsUrl = String.fromEnvironment(
   'GATEWAY_WS_URL',
   defaultValue: 'ws://localhost:18789',
 );
+const _terminalWsUrl = String.fromEnvironment(
+  'TERMINAL_WS_URL',
+  defaultValue: 'ws://localhost/terminal/',
+);
 
 final gatewayClientProvider = ChangeNotifierProvider<gw.GatewayClient>((ref) {
   return gw.GatewayClient(url: _wsUrl, auth: _sharedAuth);
 });
 
+final terminalClientProvider = ChangeNotifierProvider<TerminalProxyClient>((ref) {
+  return TerminalProxyClient(url: _terminalWsUrl, auth: _sharedAuth);
+});
 
 class ShellPage extends ConsumerStatefulWidget {
   const ShellPage({super.key});
@@ -46,7 +58,6 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       client.connect().catchError((e) {
         debugPrint('[Shell] connect failed: $e');
       });
-      // Auto-show governance panel when approval events arrive
       _approvalSub = client.approvalEvents.listen((_) {
         if (!_showGovernance && mounted) {
           setState(() => _showGovernance = true);
@@ -61,43 +72,92 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     super.dispose();
   }
 
+  void _showOnboardingDialog({OnboardingStep initialStep = OnboardingStep.welcome}) {
+    final t = ShellTokens.of(context);
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => Dialog(
+        backgroundColor: t.surfaceBase,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.zero,
+          side: BorderSide(color: t.border, width: 0.5),
+        ),
+        child: Container(
+          width: MediaQuery.of(context).size.width * 0.82,
+          height: MediaQuery.of(context).size.height * 0.84,
+          constraints: const BoxConstraints(maxWidth: 980, maxHeight: 760),
+          child: OnboardingWizard(
+            initialStep: initialStep,
+            onComplete: () => Navigator.of(context).pop(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showSkillsCronDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => const SkillsCronDialog(),
+    );
+  }
+
+  void _cycleTheme() {
+    final current = ref.read(themeModeProvider);
+    final next = switch (current) {
+      ThemeMode.system => ThemeMode.dark,
+      ThemeMode.dark => ThemeMode.light,
+      ThemeMode.light => ThemeMode.system,
+    };
+    ref.read(themeModeProvider.notifier).state = next;
+    saveThemeMode(next);
+  }
+
+  String _themeModeLabel(ThemeMode mode) {
+    return switch (mode) {
+      ThemeMode.system => 'sys',
+      ThemeMode.dark => 'dark',
+      ThemeMode.light => 'light',
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final client = ref.watch(gatewayClientProvider);
     final isConnected = client.state == gw.ConnectionState.connected;
+    final t = ShellTokens.of(context);
 
     return Scaffold(
       body: Column(
         children: [
-          _buildStatusBar(client.state),
+          _buildStatusBar(client.state, t),
           Expanded(
             child: Row(
               children: [
-                // Main chat area
                 Expanded(
                   flex: 6,
                   child: const ChatStreamView(),
                 ),
-                // Canvas panel (always visible)
                 Expanded(
                   flex: 4,
                   child: Container(
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                       border: Border(
-                        left: BorderSide(color: Color(0xFF2A2A2A)),
+                        left: BorderSide(color: t.border, width: 0.5),
                       ),
                     ),
                     child: const A2UIRendererPanel(),
                   ),
                 ),
-                // Governance panel (auto-shows on approval events)
                 if (_showGovernance)
                   Expanded(
                     flex: 4,
                     child: Container(
-                      decoration: const BoxDecoration(
+                      decoration: BoxDecoration(
                         border: Border(
-                          left: BorderSide(color: Color(0xFF2A2A2A)),
+                          left: BorderSide(color: t.border, width: 0.5),
                         ),
                       ),
                       child: ApprovalPanel(
@@ -116,57 +176,46 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     );
   }
 
-  Widget _buildStatusBar(gw.ConnectionState state) {
-    Color dotColor;
-    String label;
-    switch (state) {
-      case gw.ConnectionState.connected:
-        dotColor = const Color(0xFF6EE7B7);
-        label = 'CONNECTED';
-        break;
-      case gw.ConnectionState.connecting:
-        dotColor = const Color(0xFFFBBF24);
-        label = 'CONNECTING...';
-        break;
-      case gw.ConnectionState.error:
-        dotColor = const Color(0xFFEF4444);
-        label = 'ERROR';
-        break;
-      case gw.ConnectionState.disconnected:
-        dotColor = const Color(0xFF6B6B6B);
-        label = 'DISCONNECTED';
-        break;
-    }
+  Widget _buildStatusBar(gw.ConnectionState state, ShellTokens t) {
+    final dotColor = switch (state) {
+      gw.ConnectionState.connected => t.accentPrimary,
+      gw.ConnectionState.connecting => t.statusWarning,
+      gw.ConnectionState.error => t.statusError,
+      gw.ConnectionState.disconnected => t.fgDisabled,
+    };
+
+    final themeMode = ref.watch(themeModeProvider);
+    final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(color: t.fgMuted);
 
     return Container(
-      height: 36,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: const BoxDecoration(
-        color: Color(0xFF0F0F0F),
-        border: Border(bottom: BorderSide(color: Color(0xFF2A2A2A))),
+      height: 28,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: t.border, width: 0.5),
+        ),
       ),
       child: Row(
         children: [
           Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: dotColor,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall,
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
           ),
           const Spacer(),
-          Text(
-            'TRINITY AGI',
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  letterSpacing: 2,
-                  color: const Color(0xFF3A3A3A),
-                ),
+          GestureDetector(
+            onTap: _cycleTheme,
+            child: Text(_themeModeLabel(themeMode), style: labelStyle),
+          ),
+          const SizedBox(width: 14),
+          GestureDetector(
+            onTap: () => _showOnboardingDialog(initialStep: OnboardingStep.welcome),
+            child: Text('setup', style: labelStyle),
+          ),
+          const SizedBox(width: 14),
+          GestureDetector(
+            onTap: _showSkillsCronDialog,
+            child: Text('catalog', style: labelStyle),
           ),
         ],
       ),

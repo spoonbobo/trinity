@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/theme.dart';
 import '../../models/a2ui_models.dart';
 import '../../models/ws_frame.dart';
 import '../shell/shell_page.dart';
@@ -134,47 +135,62 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final t = ShellTokens.of(context);
+
+    final header = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: t.border, width: 0.5)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.grid_view_rounded, size: 13, color: t.fgTertiary),
+          const SizedBox(width: 6),
+          Text(
+            'canvas',
+            style: theme.textTheme.labelSmall?.copyWith(color: t.fgMuted),
+          ),
+        ],
+      ),
+    );
 
     if (_surfaces.isEmpty) {
-      return Container(
-        color: const Color(0xFF0A0A0A),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.grid_view_rounded,
-                size: 36,
-                color: theme.colorScheme.primary.withOpacity(0.2),
+      return Column(
+        children: [
+          header,
+          Expanded(
+            child: Center(
+              child: Text(
+                'canvas',
+                style: theme.textTheme.bodyMedium?.copyWith(color: t.fgPlaceholder),
               ),
-              const SizedBox(height: 12),
-              Text(
-                'CANVAS',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  letterSpacing: 2,
-                  color: const Color(0xFF3A3A3A),
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
+        ],
       );
     }
 
-    return ListView(
-      padding: const EdgeInsets.all(12),
-      children: _surfaces.values.map((surface) {
-        if (surface.rootId == null) return const SizedBox.shrink();
-        final rootComponent = surface.components.where(
-          (c) => c.id == surface.rootId,
-        );
-        if (rootComponent.isEmpty) return const SizedBox.shrink();
-        return _renderComponent(
-          rootComponent.first,
-          surface.components,
-          theme,
-        );
-      }).toList(),
+    return Column(
+      children: [
+        header,
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(12),
+            children: _surfaces.values.map((surface) {
+              if (surface.rootId == null) return const SizedBox.shrink();
+              final rootComponent = surface.components.where(
+                (c) => c.id == surface.rootId,
+              );
+              if (rootComponent.isEmpty) return const SizedBox.shrink();
+              return _renderComponent(
+                rootComponent.first,
+                surface.components,
+                theme,
+              );
+            }).toList(),
+          ),
+        ),
+      ],
     );
   }
 
