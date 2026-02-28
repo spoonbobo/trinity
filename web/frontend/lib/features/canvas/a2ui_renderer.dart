@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/a2ui_models.dart';
 import '../../models/ws_frame.dart';
 import '../shell/shell_page.dart';
 
-/// Renders A2UI v0.8 surfaces pushed by the OpenClaw agent via Canvas tool.
+final a2uiJsonlPattern = RegExp(r'```a2ui\n([\s\S]*?)```');
+
+/// Renders A2UI v0.8 surfaces pushed by the agent via inline JSONL in chat.
 class A2UIRendererPanel extends ConsumerStatefulWidget {
   const A2UIRendererPanel({super.key});
 
@@ -15,20 +18,44 @@ class A2UIRendererPanel extends ConsumerStatefulWidget {
 
 class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
   final Map<String, A2UISurface> _surfaces = {};
-  StreamSubscription<WsEvent>? _sub;
+  StreamSubscription<WsEvent>? _chatSub;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final client = ref.read(gatewayClientProvider);
-      _sub = client.events
-          .where((e) =>
-              e.event == 'canvas' ||
-              e.event == 'a2ui' ||
-              e.event.startsWith('canvas.'))
-          .listen(_handleA2UIEvent);
+      _chatSub = client.events.listen(_handleEvent);
     });
+  }
+
+  void _handleEvent(WsEvent event) {
+    if (event.event == 'a2ui' || event.event == 'canvas') {
+      _handleA2UIEvent(event);
+      return;
+    }
+
+    if (event.event != 'chat') return;
+    final state = event.payload['state'] as String?;
+    if (state != 'final') return;
+
+    final message = event.payload['message'] as Map<String, dynamic>?;
+    if (message == null) return;
+    final contentList = message['content'] as List<dynamic>?;
+    if (contentList == null || contentList.isEmpty) return;
+    final text = (contentList[0] as Map<String, dynamic>)['text'] as String? ?? '';
+
+    final match = a2uiJsonlPattern.firstMatch(text);
+    if (match == null) return;
+
+    final jsonlBlock = match.group(1) ?? '';
+    for (final line in jsonlBlock.split('\n')) {
+      if (line.trim().isEmpty) continue;
+      try {
+        final parsed = jsonDecode(line.trim()) as Map<String, dynamic>;
+        _handleA2UIEvent(WsEvent(event: 'a2ui', payload: parsed));
+      } catch (_) {}
+    }
   }
 
   void _handleA2UIEvent(WsEvent event) {
@@ -72,7 +99,7 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
 
   @override
   void dispose() {
-    _sub?.cancel();
+    _chatSub?.cancel();
     super.dispose();
   }
 
@@ -262,7 +289,7 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
           ),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         ),
-        child: Text(label, style: const TextStyle(fontFamily: 'SpaceMono')),
+        child: Text(label, style: const TextStyle(fontFamily: 'monofur')),
       ),
     );
   }

@@ -5,6 +5,7 @@ COPY pubspec.yaml pubspec.lock* ./
 RUN flutter pub get
 
 COPY . .
-RUN flutter build web --release
+ARG GATEWAY_TOKEN=replace-me-with-a-real-token
+RUN flutter build web --release --dart-define=GATEWAY_TOKEN=$GATEWAY_TOKEN
 
 CMD ["cp", "-r", "/app/build/web/.", "/output/"]

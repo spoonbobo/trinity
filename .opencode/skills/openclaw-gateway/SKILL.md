@@ -1,0 +1,196 @@
+---
+name: openclaw-gateway
+description: Operate the OpenClaw Gateway that powers Trinity AGI — configure providers, manage sessions, use the CLI, and understand the WebSocket protocol.
+license: MIT
+compatibility: opencode
+metadata:
+  audience: developers
+  workflow: trinity-agi
+---
+
+## What This Skill Covers
+
+OpenClaw Gateway is the backend engine for Trinity AGI. It provides the agent runtime, multi-provider LLM, tool execution, sessions, memory, governance, and multi-channel messaging. All agent logic flows through OpenClaw — never call LLM APIs directly.
+
+Documentation index: https://docs.openclaw.ai/llms.txt
+Use that file to discover all available doc pages before exploring further.
+
+## Running Stack (Docker)
+
+The Trinity stack runs via Docker Compose from `web/docker-compose.yml`:
+
+```
+docker compose -f web/docker-compose.yml up -d          # start
+docker compose -f web/docker-compose.yml down            # stop
+docker compose -f web/docker-compose.yml logs -f         # follow logs
+docker restart trinity-openclaw                          # restart gateway only
+```
+
+Services:
+- `trinity-openclaw` — OpenClaw Gateway on port 18789
+- `trinity-nginx` — serves Flutter shell on port 80, proxies WS/API to gateway
+
+## CLI Inside the Container
+
+Run OpenClaw CLI commands via `docker exec`:
+
+```
+docker exec trinity-openclaw openclaw <command>
+```
+
+Essential commands:
+
+```
+docker exec trinity-openclaw openclaw status              # gateway status
+docker exec trinity-openclaw openclaw health --token $TOK # health check
+docker exec trinity-openclaw openclaw dashboard --no-open # get dashboard URL with token
+docker exec trinity-openclaw openclaw doctor              # diagnose config issues
+docker exec trinity-openclaw openclaw doctor --fix        # auto-fix config issues
+docker exec trinity-openclaw openclaw models              # list available models
+docker exec -it trinity-openclaw bash         # interactive config - openclow configure
+docker exec trinity-openclaw openclaw sessions list       # list sessions
+docker exec trinity-openclaw openclaw logs --tail 50      # recent logs
+docker exec -it trinity-openclaw openclaw channels login # login
+```
+
+The gateway token is stored in `web/.env` as `OPENCLAW_GATEWAY_TOKEN`.
+
+## Configuration
+
+Config lives at `web/openclaw.json` (mounted read-only into the container at `~/.openclaw/openclaw.json`).
+
+Format is JSON5 (comments + trailing commas allowed). All fields are optional — OpenClaw uses safe defaults when omitted.
+
+The live config is inside the Docker volume at `/home/node/.openclaw/openclaw.json`. The `command` in `docker-compose.yml` passes `--bind lan` so the gateway listens on all container interfaces (required for Docker port mapping).
+
+**Important notes from setup:**
+
+- The config file is NOT bind-mounted (atomic rename fails on Windows Docker bind mounts). It lives in the `openclaw-data` volume. To sync it back to the host: `docker cp trinity-openclaw:/home/node/.openclaw/openclaw.json web/openclaw.json`
+- `agents.defaults.sandbox.mode` must be `"off"` (not `"non-main"`) because Docker CLI is not available inside the gateway container. Setting it to `"non-main"` causes `spawn docker ENOENT` errors when handling WhatsApp or non-main sessions.
+- The onboarding wizard (`openclaw onboard`) may overwrite `gateway.bind` back to `"loopback"` and inject its own token into the config. Always verify after running the wizard.
+- The Flutter frontend needs the gateway token at build time via `--dart-define=GATEWAY_TOKEN=...`. The docker-compose passes `OPENCLAW_GATEWAY_TOKEN` from `.env` as a build arg.
+
+### Key Config Sections
+
+**LLM providers** — configured via the dashboard at `http://localhost:18789` or via:
+```
+docker exec trinity-openclaw openclaw configure --section providers
+```
+Docs: https://docs.openclaw.ai/providers/index.md
+
+**Tools** — `tools.profile` controls the base allowlist (`minimal`, `coding`, `messaging`, `full`). Individual tools toggled via `tools.allow` / `tools.deny`. Tool groups: `group:runtime`, `group:fs`, `group:sessions`, `group:memory`, `group:web`, `group:ui`, `group:automation`, `group:messaging`, `group:nodes`.
+
+**Web tools** — `web_search` requires a Brave API key. Configure via:
+```
+docker exec trinity-openclaw openclaw configure --section web
+```
+
+**Sandbox** — `agents.defaults.sandbox.mode: "non-main"` means non-main sessions run tools in Docker isolation. Scope `"agent"` = one sandbox container per agent.
+
+**Channels** (WhatsApp, Telegram, Discord, etc.):
+```
+docker exec -it trinity-openclaw openclaw channels login        # WhatsApp QR
+docker exec trinity-openclaw openclaw channels add --channel telegram --token "BOT_TOKEN"
+docker exec trinity-openclaw openclaw channels add --channel discord --token "BOT_TOKEN"
+```
+Docs: https://docs.openclaw.ai/channels/index.md
+
+Full config reference: https://docs.openclaw.ai/gateway/configuration-reference.md
+
+## WebSocket Protocol
+
+The Flutter shell and all clients connect to the gateway via WebSocket. Protocol version 3.
+
+### Frame Types
+
+- **Request**: `{type:"req", id, method, params}`
+- **Response**: `{type:"res", id, ok, payload|error}`
+- **Event**: `{type:"event", event, payload, seq?, stateVersion?}`
+
+### Handshake Flow
+
+1. Gateway sends `connect.challenge` event with a nonce
+2. Client sends `connect` request with auth token, client info, device identity
+3. Gateway responds with `hello-ok` including protocol version and policy
+
+### Roles
+
+- `operator` — control plane client (CLI, web UI, Flutter shell). Scopes: `operator.read`, `operator.write`, `operator.admin`, `operator.approvals`.
+- `node` — capability host (camera, screen, canvas). Declares `caps`, `commands`, `permissions`.
+
+### Key Methods
+
+- `chat.send` — send user message (requires session key + idempotency key)
+- `chat.history` — fetch chat history
+- `chat.abort` — cancel in-progress agent run
+- `exec.approval.resolve` — resolve exec approval requests
+- `tools.catalog` — fetch available tools for an agent
+
+### Key Events
+
+- `chat` — chat messages and streaming updates
+- `agent` — agent thinking, tool calls, tool results
+- `exec.approval.requested` — approval gate triggered
+- `canvas` / `a2ui` — UI surface updates from the agent
+
+Full protocol docs: https://docs.openclaw.ai/gateway/protocol.md
+
+## Available Tools
+
+The gateway exposes these tools to the agent (with `tools.profile: "full"`):
+
+| Tool | Purpose |
+|------|---------|
+| `exec` | Run shell commands in workspace |
+| `process` | Manage background exec sessions |
+| `read` / `write` / `edit` / `apply_patch` | File operations |
+| `web_search` | Brave Search API (needs API key) |
+| `web_fetch` | Fetch URL content as markdown |
+| `browser` | Control OpenClaw-managed browser |
+| `canvas` | Drive node Canvas / A2UI surfaces |
+| `nodes` | Discover and target paired nodes |
+| `image` | Analyze images with image model |
+| `message` | Send across Discord/Telegram/WhatsApp/Slack/etc. |
+| `cron` | Manage scheduled jobs and wakeups |
+| `gateway` | Restart or apply config updates |
+| `sessions_*` | List, inspect, send to, spawn sessions |
+| `lobster` | Typed workflow runtime with approval gates |
+| `memory_search` / `memory_get` | Agent memory |
+
+Full tools docs: https://docs.openclaw.ai/tools/index.md
+
+## Governance
+
+Every agent action that modifies system state passes through OpenClaw's governance layer:
+
+- **Exec approvals** — `ask` policy requires user consent. Never bypass. Never auto-approve.
+- **Lobster workflows** — `approval: required` steps halt until user approves/rejects.
+- **Sandbox isolation** — on by default for non-main sessions.
+- **Loop detection** — enabled. Blocks repetitive no-progress tool-call loops.
+
+## Troubleshooting
+
+**Gateway won't start:**
+```
+docker logs trinity-openclaw --tail 30
+docker exec trinity-openclaw openclaw doctor --fix
+```
+
+**Config validation errors:** check `web/openclaw.json` syntax. The config is JSON5 but must pass OpenClaw's schema validation.
+
+**"unauthorized" / "token mismatch":** the dashboard needs the gateway token. Get the authenticated URL:
+```
+docker exec trinity-openclaw openclaw dashboard --no-open
+```
+
+**Rebuild after code changes:**
+```
+docker compose -f web/docker-compose.yml --profile build run --rm frontend-builder
+docker compose -f web/docker-compose.yml up -d
+```
+
+**Update OpenClaw to latest:**
+```
+docker compose -f web/docker-compose.yml build --no-cache openclaw-gateway
+docker compose -f web/docker-compose.yml up -d
+```

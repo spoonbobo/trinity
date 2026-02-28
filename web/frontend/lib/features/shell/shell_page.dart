@@ -7,21 +7,23 @@ import '../chat/chat_stream.dart';
 import '../canvas/a2ui_renderer.dart';
 import '../governance/approval_panel.dart';
 
+final _sharedDevice = DeviceIdentity.generate();
+final _sharedAuth = GatewayAuth(
+  token: const String.fromEnvironment(
+    'GATEWAY_TOKEN',
+    defaultValue: 'replace-me-with-a-real-token',
+  ),
+  device: _sharedDevice,
+);
+const _wsUrl = String.fromEnvironment(
+  'GATEWAY_WS_URL',
+  defaultValue: 'ws://localhost:18789',
+);
+
 final gatewayClientProvider = ChangeNotifierProvider<gw.GatewayClient>((ref) {
-  final device = DeviceIdentity.generate();
-  final auth = GatewayAuth(
-    token: const String.fromEnvironment(
-      'GATEWAY_TOKEN',
-      defaultValue: 'replace-me-with-a-real-token',
-    ),
-    device: device,
-  );
-  final wsUrl = const String.fromEnvironment(
-    'GATEWAY_WS_URL',
-    defaultValue: 'ws://localhost:18789',
-  );
-  return gw.GatewayClient(url: wsUrl, auth: auth);
+  return gw.GatewayClient(url: _wsUrl, auth: _sharedAuth);
 });
+
 
 class ShellPage extends ConsumerStatefulWidget {
   const ShellPage({super.key});

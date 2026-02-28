@@ -26,8 +26,8 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   fonts:
-    - family: SpaceMono
+    - family: monofur
       fonts:
-        - asset: fonts/SpaceMono-Regular.ttf
-        - asset: fonts/SpaceMono-Bold.ttf
+        - asset: fonts/monofur-Regular.ttf
+        - asset: fonts/monofur-Bold.ttf
           weight: 700

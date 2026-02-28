@@ -5,8 +5,6 @@ class DeviceIdentity {
 
   DeviceIdentity._(this.id);
 
-  /// Generates a stable device ID per browser session.
-  /// In production, persist this in localStorage.
   factory DeviceIdentity.generate() {
     return DeviceIdentity._(const Uuid().v4());
   }
@@ -18,8 +16,14 @@ class GatewayAuth {
 
   const GatewayAuth({required this.token, required this.device});
 
-  Map<String, dynamic> toConnectParams() => {
+  Map<String, dynamic> toConnectParams(String? nonce) => {
         'auth': {'token': token},
-        'device': {'id': device.id},
+        'device': {
+          'id': device.id,
+          'publicKey': device.id,
+          'signature': 'nosig',
+          'signedAt': DateTime.now().millisecondsSinceEpoch,
+          'nonce': nonce ?? '',
+        },
       };
 }

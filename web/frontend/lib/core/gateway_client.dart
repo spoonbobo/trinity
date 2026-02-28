@@ -57,11 +57,13 @@ class GatewayClient extends ChangeNotifier {
   }
 
   void _onMessage(dynamic raw) {
-    final frame = WsFrame.parse(raw as String);
+    debugPrint('[GW] raw: ${(raw as String).length > 300 ? raw.substring(0, 300) : raw}');
+    final frame = WsFrame.parse(raw);
 
     switch (frame.type) {
       case FrameType.event:
         final event = frame.event!;
+        debugPrint('[GW] event: ${event.event}');
         if (event.event == 'connect.challenge') {
           _handleChallenge(event);
         } else {
@@ -70,11 +72,11 @@ class GatewayClient extends ChangeNotifier {
         break;
       case FrameType.res:
         final response = frame.response!;
+        debugPrint('[GW] res: id=${response.id} ok=${response.ok}');
         final completer = _responseCompleters.remove(response.id);
         if (completer != null) {
           completer.complete(response);
         }
-        // Also emit hello-ok as a state change
         if (response.ok &&
             response.payload?['type'] == 'hello-ok') {
           _state = ConnectionState.connected;
@@ -96,10 +98,10 @@ class GatewayClient extends ChangeNotifier {
       'minProtocol': 3,
       'maxProtocol': 3,
       'client': {
-        'id': 'trinity-shell',
-        'version': '0.1.0',
+        'id': 'openclaw-control-ui',
+        'version': 'dev',
         'platform': 'web',
-        'mode': 'operator',
+        'mode': 'webchat',
       },
       'role': 'operator',
       'scopes': ['operator.read', 'operator.write', 'operator.approvals'],
@@ -108,7 +110,7 @@ class GatewayClient extends ChangeNotifier {
       'permissions': {},
       'locale': 'en-US',
       'userAgent': 'trinity-shell/0.1.0',
-      ...auth.toConnectParams(),
+      ...auth.toConnectParams(nonce),
     };
 
     sendRequest('connect', params);
@@ -130,6 +132,10 @@ class GatewayClient extends ChangeNotifier {
   /// Send a chat message to the agent.
   Future<WsResponse> sendChatMessage(String message,
       {String sessionKey = 'main'}) {
+    _eventController.add(WsEvent(
+      event: 'chat',
+      payload: {'type': 'message', 'role': 'user', 'content': message},
+    ));
     return sendRequest('chat.send', {
       'message': message,
       'sessionKey': sessionKey,

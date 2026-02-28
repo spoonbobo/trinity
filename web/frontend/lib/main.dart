@@ -26,7 +26,7 @@ class TrinityApp extends StatelessWidget {
           onPrimary: const Color(0xFF0A0A0A),
           outline: const Color(0xFF2A2A2A),
         ),
-        cardTheme: CardTheme(
+        cardTheme: CardThemeData(
           color: const Color(0xFF141414),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -36,23 +36,23 @@ class TrinityApp extends StatelessWidget {
         ),
         textTheme: const TextTheme(
           bodyLarge: TextStyle(
-            fontFamily: 'SpaceMono',
+            fontFamily: 'monofur',
             color: Color(0xFFE5E5E5),
             fontSize: 14,
           ),
           bodyMedium: TextStyle(
-            fontFamily: 'SpaceMono',
+            fontFamily: 'monofur',
             color: Color(0xFFB0B0B0),
             fontSize: 13,
           ),
           titleLarge: TextStyle(
-            fontFamily: 'SpaceMono',
+            fontFamily: 'monofur',
             color: Color(0xFFE5E5E5),
             fontSize: 18,
             fontWeight: FontWeight.w700,
           ),
           labelSmall: TextStyle(
-            fontFamily: 'SpaceMono',
+            fontFamily: 'monofur',
             color: Color(0xFF6B6B6B),
             fontSize: 11,
           ),
@@ -75,7 +75,7 @@ class TrinityApp extends StatelessWidget {
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           hintStyle: const TextStyle(
-            fontFamily: 'SpaceMono',
+            fontFamily: 'monofur',
             color: Color(0xFF4A4A4A),
             fontSize: 13,
           ),

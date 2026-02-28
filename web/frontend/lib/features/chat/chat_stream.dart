@@ -98,25 +98,64 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
     final payload = event.payload;
 
     if (event.event == 'chat') {
+      final state = payload['state'] as String?;
       final type = payload['type'] as String?;
-      final content = payload['content'] as String? ??
-          payload['text'] as String? ??
-          '';
 
-      switch (type) {
-        case 'message':
-          final role = payload['role'] as String? ?? 'assistant';
-          if (role == 'user') {
-            setState(() {
-              _entries.add(ChatEntry(role: 'user', content: content));
-            });
-          } else {
-            // Start or append to streaming assistant message
-            _appendAssistantContent(content, streaming: true);
+      if (type == 'message' && payload['role'] == 'user') {
+        final content = payload['content'] as String? ?? '';
+        setState(() {
+          _entries.add(ChatEntry(role: 'user', content: content));
+        });
+      } else if (state == 'delta' || state == 'final') {
+        final message = payload['message'] as Map<String, dynamic>?;
+        if (message != null) {
+          final contentList = message['content'] as List<dynamic>?;
+          if (contentList != null && contentList.isNotEmpty) {
+            final first = contentList[0] as Map<String, dynamic>;
+            final text = first['text'] as String? ?? '';
+            if (state == 'final') {
+              setState(() {
+                _agentThinking = false;
+                if (_entries.isNotEmpty && _entries.last.role == 'assistant') {
+                  _entries[_entries.length - 1] = _entries.last.copyWith(
+                    content: text,
+                    isStreaming: false,
+                  );
+                } else {
+                  _entries.add(ChatEntry(role: 'assistant', content: text));
+                }
+              });
+            } else {
+              setState(() {
+                _agentThinking = false;
+                if (_entries.isNotEmpty &&
+                    _entries.last.role == 'assistant' &&
+                    _entries.last.isStreaming) {
+                  _entries[_entries.length - 1] = _entries.last.copyWith(
+                    content: text,
+                    isStreaming: true,
+                  );
+                } else {
+                  _entries.add(ChatEntry(
+                    role: 'assistant',
+                    content: text,
+                    isStreaming: true,
+                  ));
+                }
+              });
+            }
           }
-          break;
-        case 'done':
-          // Finalize the last assistant message
+        }
+      }
+    } else if (event.event == 'agent') {
+      final stream = payload['stream'] as String?;
+      final data = payload['data'] as Map<String, dynamic>?;
+
+      if (stream == 'lifecycle') {
+        final phase = data?['phase'] as String?;
+        if (phase == 'start') {
+          setState(() => _agentThinking = true);
+        } else if (phase == 'end') {
           setState(() {
             _agentThinking = false;
             if (_entries.isNotEmpty && _entries.last.role == 'assistant') {
@@ -124,46 +163,32 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
                   _entries.last.copyWith(isStreaming: false);
             }
           });
-          break;
-        default:
-          if (content.isNotEmpty) {
-            _appendAssistantContent(content, streaming: true);
+        }
+      } else if (stream == 'tool_call') {
+        final toolName = data?['tool'] as String? ??
+            data?['name'] as String? ??
+            'tool';
+        final args = data?['args']?.toString() ?? '';
+        setState(() {
+          _entries.add(ChatEntry(
+            role: 'tool',
+            content: args,
+            toolName: toolName,
+            isStreaming: true,
+          ));
+        });
+      } else if (stream == 'tool_result') {
+        final result = data?['result']?.toString() ??
+            data?['output']?.toString() ??
+            '';
+        setState(() {
+          if (_entries.isNotEmpty && _entries.last.role == 'tool') {
+            _entries[_entries.length - 1] = _entries.last.copyWith(
+              content: result,
+              isStreaming: false,
+            );
           }
-      }
-    } else if (event.event == 'agent') {
-      final type = payload['type'] as String?;
-      switch (type) {
-        case 'thinking':
-          setState(() => _agentThinking = true);
-          break;
-        case 'tool_call':
-          final toolName = payload['tool'] as String? ??
-              payload['name'] as String? ??
-              'tool';
-          final args = payload['args']?.toString() ?? '';
-          setState(() {
-            _entries.add(ChatEntry(
-              role: 'tool',
-              content: args,
-              toolName: toolName,
-              isStreaming: true,
-            ));
-          });
-          break;
-        case 'tool_result':
-          final result = payload['result']?.toString() ??
-              payload['output']?.toString() ??
-              '';
-          setState(() {
-            // Update the last tool entry with its result
-            if (_entries.isNotEmpty && _entries.last.role == 'tool') {
-              _entries[_entries.length - 1] = _entries.last.copyWith(
-                content: result,
-                isStreaming: false,
-              );
-            }
-          });
-          break;
+        });
       }
     }
 
