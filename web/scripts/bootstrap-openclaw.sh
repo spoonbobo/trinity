@@ -33,6 +33,14 @@ seed_dir_if_empty() {
 seed_dir_if_empty "$SEED_ROOT/skills" "$OPENCLAW_HOME/skills"
 seed_dir_if_empty "$SEED_ROOT/cron-templates" "$OPENCLAW_HOME/cron-templates"
 
+mkdir -p "$OPENCLAW_HOME/workspace"
+if [ ! -f "$OPENCLAW_HOME/workspace/MEMORY.md" ] && [ -f "$SEED_ROOT/workspace/MEMORY.md" ]; then
+  cp -a "$SEED_ROOT/workspace/MEMORY.md" "$OPENCLAW_HOME/workspace/MEMORY.md"
+  echo "[bootstrap] Seeded $OPENCLAW_HOME/workspace/MEMORY.md"
+else
+  echo "[bootstrap] Keeping existing $OPENCLAW_HOME/workspace/MEMORY.md"
+fi
+
 # ACP defaults (idempotent; only fills missing keys)
 ensure_config "plugins.entries.acpx.enabled" "true"
 ensure_config "acp.enabled" "true"

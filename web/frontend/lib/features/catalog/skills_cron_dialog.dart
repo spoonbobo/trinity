@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme.dart';
+import '../../core/i18n.dart';
+import '../../main.dart' show languageProvider;
 import '../shell/shell_page.dart' show terminalClientProvider;
 
 enum CatalogTab { skills, crons }
@@ -30,6 +32,11 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
   bool _clawhubSearching = false;
   String? _clawhubError;
   List<Map<String, String>> _clawhubResults = [];
+
+  String _stripAnsi(String input) {
+    final ansi = RegExp(r'\x1B\[[0-9;]*[A-Za-z]');
+    return input.replaceAll(ansi, '');
+  }
 
   CatalogTab _tab = CatalogTab.skills;
   SkillsCategory _skillsCategory = SkillsCategory.ready;
@@ -185,7 +192,10 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
       return;
     }
 
-    final escaped = query.replaceAll('"', '\\"');
+    final normalizedQuery = query
+        .replaceAll('"', '')
+        .replaceAll("'", '')
+        .trim();
 
     setState(() {
       _clawhubSearching = true;
@@ -195,16 +205,33 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
 
     try {
       final raw = await client.executeCommandForOutput(
-        'clawhub search "$escaped" --limit 20',
+        'clawhub search $normalizedQuery --limit 20',
         timeout: const Duration(seconds: 60),
       );
 
       final parsed = <Map<String, String>>[];
       for (final line in raw.split('\n')) {
-        final trimmed = line.trim();
-        if (!trimmed.startsWith('- ')) continue;
+        final trimmed = _stripAnsi(line).trim();
+        if (trimmed.isEmpty) continue;
+        if (trimmed.toLowerCase().contains('searching')) continue;
+        if (trimmed.toLowerCase().startsWith('error:')) continue;
 
-        final withoutPrefix = trimmed.substring(2).trim();
+        final withoutPrefix = trimmed.startsWith('- ')
+            ? trimmed.substring(2).trim()
+            : trimmed;
+
+        final pattern = RegExp(r'^([^\s]+)\s+(.+?)\s*\(([-0-9.]+)\)$');
+        final match = pattern.firstMatch(withoutPrefix);
+        if (match != null) {
+          final slug = (match.group(1) ?? '').trim();
+          final name = (match.group(2) ?? '').trim();
+          final score = (match.group(3) ?? '').trim();
+          if (slug.isNotEmpty) {
+            parsed.add({'slug': slug, 'name': name.isEmpty ? slug : name, 'score': score});
+            continue;
+          }
+        }
+
         final scoreStart = withoutPrefix.lastIndexOf('(');
         final scoreEnd = withoutPrefix.lastIndexOf(')');
 
@@ -216,9 +243,18 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
         }
 
         if (body.isEmpty) continue;
+        if (!body.contains('  ')) continue;
         final parts = body.split(RegExp(r'\s{2,}'));
-        final slug = parts.isNotEmpty ? parts.first.trim() : body;
-        final name = parts.length > 1 ? parts.sublist(1).join(' ').trim() : slug;
+        String slug = parts.isNotEmpty ? parts.first.trim() : body;
+        String name = parts.length > 1 ? parts.sublist(1).join(' ').trim() : slug;
+
+        if (parts.length <= 1) {
+          final singleSplit = body.split(RegExp(r'\s+'));
+          if (singleSplit.isNotEmpty) {
+            slug = singleSplit.first.trim();
+            name = singleSplit.length > 1 ? singleSplit.sublist(1).join(' ').trim() : slug;
+          }
+        }
         if (slug.isEmpty) continue;
 
         parsed.add({'slug': slug, 'name': name, 'score': score});
@@ -227,6 +263,18 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
       if (!mounted) return;
       setState(() {
         _clawhubResults = parsed;
+        if (parsed.isEmpty) {
+          final rawLines = raw
+              .split('\n')
+              .map(_stripAnsi)
+              .map((s) => s.trim())
+              .where((s) => s.isNotEmpty && !s.startsWith('4 '))
+              .take(4)
+              .join(' | ');
+          _clawhubError = rawLines.isEmpty
+              ? 'no results. try simpler keywords (e.g. calendar, github, discord)'
+              : 'no parsed results. raw: $rawLines';
+        }
       });
     } catch (e) {
       if (!mounted) return;
@@ -498,6 +546,7 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
   Widget _buildClawhubSearchView() {
     final t = ShellTokens.of(context);
     final theme = Theme.of(context);
+    final language = ref.watch(languageProvider);
 
     return Column(
       children: [
@@ -521,7 +570,7 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
               GestureDetector(
                 onTap: _clawhubSearching ? null : _searchClawhub,
                 child: Text(
-                  _clawhubSearching ? 'searching...' : 'search',
+                  _clawhubSearching ? 'searching...' : tr(language, 'search'),
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: _clawhubSearching ? t.fgDisabled : t.accentPrimary,
                   ),
@@ -539,6 +588,22 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
                 _clawhubError!,
                 style: theme.textTheme.bodyMedium?.copyWith(color: t.statusError),
               ),
+            ),
+          ),
+        if (_clawhubResults.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(left: 12, right: 12, top: 8),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 64,
+                  child: Text(
+                    tr(language, 'similarity'),
+                    style: theme.textTheme.labelSmall?.copyWith(color: t.fgTertiary),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
             ),
           ),
         Expanded(
@@ -570,9 +635,18 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
+          SizedBox(
+            width: 64,
+            child: Text(
+              score.isEmpty ? '-' : score,
+              style: theme.textTheme.labelSmall?.copyWith(color: t.fgTertiary),
+              textAlign: TextAlign.left,
+            ),
+          ),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
-              score.isEmpty ? '$slug  $name' : '$slug  $name  ($score)',
+              '$slug  $name',
               style: theme.textTheme.bodyMedium?.copyWith(color: t.fgPrimary),
             ),
           ),

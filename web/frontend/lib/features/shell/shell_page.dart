@@ -5,14 +5,17 @@ import '../../core/gateway_client.dart' as gw;
 import '../../core/auth.dart';
 import '../../core/terminal_client.dart';
 import '../../core/theme.dart';
+import '../../core/i18n.dart';
 import '../../models/ws_frame.dart';
-import '../../main.dart' show themeModeProvider;
+import '../../main.dart' show languageProvider;
 import '../prompt_bar/prompt_bar.dart';
 import '../chat/chat_stream.dart';
 import '../canvas/a2ui_renderer.dart';
 import '../governance/approval_panel.dart';
 import '../onboarding/onboarding_wizard.dart';
 import '../catalog/skills_cron_dialog.dart';
+import '../memory/memory_dialog.dart';
+import '../settings/settings_dialog.dart';
 
 final _sharedDevice = DeviceIdentity.generate();
 final _sharedAuth = GatewayAuth(
@@ -104,6 +107,14 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     );
   }
 
+  void _showMemoryDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => const MemoryDialog(),
+    );
+  }
+
   void _showCronsDialog() {
     showDialog(
       context: context,
@@ -112,23 +123,12 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     );
   }
 
-  void _cycleTheme() {
-    final current = ref.read(themeModeProvider);
-    final next = switch (current) {
-      ThemeMode.system => ThemeMode.dark,
-      ThemeMode.dark => ThemeMode.light,
-      ThemeMode.light => ThemeMode.system,
-    };
-    ref.read(themeModeProvider.notifier).state = next;
-    saveThemeMode(next);
-  }
-
-  String _themeModeLabel(ThemeMode mode) {
-    return switch (mode) {
-      ThemeMode.system => 'sys',
-      ThemeMode.dark => 'dark',
-      ThemeMode.light => 'light',
-    };
+  void _showSettingsDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => const SettingsDialog(),
+    );
   }
 
   @override
@@ -192,7 +192,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       gw.ConnectionState.disconnected => t.fgDisabled,
     };
 
-    final themeMode = ref.watch(themeModeProvider);
+    final language = ref.watch(languageProvider);
     final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(color: t.fgMuted);
 
     return Container(
@@ -210,25 +210,30 @@ class _ShellPageState extends ConsumerState<ShellPage> {
             height: 6,
             decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
           ),
+          const SizedBox(width: 10),
+          GestureDetector(
+            onTap: _showMemoryDialog,
+            child: Text(tr(language, 'memory'), style: labelStyle),
+          ),
           const Spacer(),
           GestureDetector(
-            onTap: _cycleTheme,
-            child: Text(_themeModeLabel(themeMode), style: labelStyle),
-          ),
-          const SizedBox(width: 14),
-          GestureDetector(
             onTap: () => _showOnboardingDialog(initialStep: OnboardingStep.welcome),
-            child: Text('setup', style: labelStyle),
+            child: Text(tr(language, 'setup'), style: labelStyle),
           ),
           const SizedBox(width: 14),
           GestureDetector(
             onTap: _showSkillsDialog,
-            child: Text('skills', style: labelStyle),
+            child: Text(tr(language, 'skills'), style: labelStyle),
           ),
           const SizedBox(width: 14),
           GestureDetector(
             onTap: _showCronsDialog,
-            child: Text('crons', style: labelStyle),
+            child: Text(tr(language, 'crons'), style: labelStyle),
+          ),
+          const SizedBox(width: 14),
+          GestureDetector(
+            onTap: _showSettingsDialog,
+            child: Text(tr(language, 'settings'), style: labelStyle),
           ),
         ],
       ),

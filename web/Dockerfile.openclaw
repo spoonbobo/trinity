@@ -6,6 +6,7 @@ RUN mkdir -p /home/node/.openclaw/extensions/canvas-bridge && chown -R node:node
 
 COPY --chown=node:node skills/ /opt/trinity-seed/skills/
 COPY --chown=node:node cron-templates/ /opt/trinity-seed/cron-templates/
+COPY --chown=node:node workspace-seed/ /opt/trinity-seed/workspace/
 COPY --chown=node:node scripts/bootstrap-openclaw.sh /usr/local/bin/bootstrap-openclaw.sh
 RUN chmod +x /usr/local/bin/bootstrap-openclaw.sh
 

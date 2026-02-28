@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../../models/ws_frame.dart';
 import '../shell/shell_page.dart';
 
@@ -364,7 +363,7 @@ class _ExecApprovalCard extends StatelessWidget {
                   foregroundColor: const Color(0xFFEF4444),
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                 ),
-                child: Text('REJECT', style: GoogleFonts.ibmPlexMono(fontSize: 11)),
+                child: Text('REJECT', style: theme.textTheme.labelSmall),
               ),
               const SizedBox(width: 8),
               ElevatedButton(
@@ -377,7 +376,7 @@ class _ExecApprovalCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(6),
                   ),
                 ),
-                child: Text('APPROVE', style: GoogleFonts.ibmPlexMono(fontSize: 11)),
+                child: Text('APPROVE', style: theme.textTheme.labelSmall),
               ),
             ],
           ),
@@ -468,7 +467,7 @@ class _LobsterApprovalCard extends StatelessWidget {
                   foregroundColor: const Color(0xFFEF4444),
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                 ),
-                child: Text('REJECT', style: GoogleFonts.ibmPlexMono(fontSize: 11)),
+                child: Text('REJECT', style: theme.textTheme.labelSmall),
               ),
               const SizedBox(width: 8),
               ElevatedButton(
@@ -481,7 +480,7 @@ class _LobsterApprovalCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(6),
                   ),
                 ),
-                child: Text('APPROVE', style: GoogleFonts.ibmPlexMono(fontSize: 11)),
+                child: Text('APPROVE', style: theme.textTheme.labelSmall),
               ),
             ],
           ),

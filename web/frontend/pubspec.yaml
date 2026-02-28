@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   web_socket_channel: ^3.0.1
   speech_to_text: ^7.0.0
   flutter_riverpod: ^2.6.1

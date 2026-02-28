@@ -35,6 +35,7 @@ const ALLOWED_COMMANDS = [
   'channels',
   'tools',
   'memory',
+  'cat /home/node/.openclaw/workspace/MEMORY.md',
   'config get',
   'config set',
   'config validate',
@@ -50,6 +51,16 @@ const INTERACTIVE_COMMANDS = [
 function validateCommand(cmd) {
   // Remove 'openclaw ' prefix if present
   const cleanCmd = cmd.replace(/^openclaw\s+/, '').trim();
+
+  if (cleanCmd === 'cat /home/node/.openclaw/workspace/MEMORY.md') {
+    return {
+      isAllowed: true,
+      isInteractive: false,
+      cleanCmd,
+      baseCmd: 'cat'
+    };
+  }
+
   const baseCmd = cleanCmd.split(' ')[0];
   
   // Check if command starts with allowed base command
@@ -101,7 +112,14 @@ function executeCommand(ws, cmd, token) {
     dockerCmd.push('-it');
   }
   
-  dockerCmd.push(OPENCLAW_CONTAINER, 'openclaw', ...validation.cleanCmd.split(' '));
+  if (validation.cleanCmd.startsWith('cat ')) {
+    const filePath = validation.cleanCmd.substring(4).trim();
+    dockerCmd.push(OPENCLAW_CONTAINER, 'cat', filePath);
+  } else if (validation.cleanCmd === 'clawhub' || validation.cleanCmd.startsWith('clawhub ')) {
+    dockerCmd.push(OPENCLAW_CONTAINER, 'clawhub', ...validation.cleanCmd.split(' ').slice(1));
+  } else {
+    dockerCmd.push(OPENCLAW_CONTAINER, 'openclaw', ...validation.cleanCmd.split(' '));
+  }
 
   ws.send(JSON.stringify({
     type: 'system',

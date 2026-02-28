@@ -2,6 +2,69 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:html' as html;
 
+enum AppFontFamily {
+  ibmPlexMono,
+  jetBrainsMono,
+}
+
+const _themeModeStorageKey = 'trinity_theme_mode';
+const _fontFamilyStorageKey = 'trinity_font_family';
+
+String appFontFamilyToStorage(AppFontFamily family) {
+  switch (family) {
+    case AppFontFamily.ibmPlexMono:
+      return 'ibm-plex-mono';
+    case AppFontFamily.jetBrainsMono:
+      return 'jetbrains-mono';
+  }
+}
+
+AppFontFamily appFontFamilyFromStorage(String? value) {
+  switch (value) {
+    case 'jetbrains-mono':
+      return AppFontFamily.jetBrainsMono;
+    case 'ibm-plex-mono':
+    default:
+      return AppFontFamily.ibmPlexMono;
+  }
+}
+
+String appFontFamilyLabel(AppFontFamily family) {
+  switch (family) {
+    case AppFontFamily.ibmPlexMono:
+      return 'IBM Plex Mono';
+    case AppFontFamily.jetBrainsMono:
+      return 'JetBrains Mono';
+  }
+}
+
+TextTheme applyAppFontToTextTheme(AppFontFamily family, TextTheme base) {
+  switch (family) {
+    case AppFontFamily.ibmPlexMono:
+      return GoogleFonts.ibmPlexMonoTextTheme(base);
+    case AppFontFamily.jetBrainsMono:
+      return GoogleFonts.jetBrainsMonoTextTheme(base);
+  }
+}
+
+TextStyle appFontStyle(
+  AppFontFamily family, {
+  TextStyle? textStyle,
+  Color? color,
+  double? fontSize,
+}) {
+  final merged = (textStyle ?? const TextStyle()).copyWith(
+    color: color ?? textStyle?.color,
+    fontSize: fontSize ?? textStyle?.fontSize,
+  );
+  switch (family) {
+    case AppFontFamily.ibmPlexMono:
+      return GoogleFonts.ibmPlexMono(textStyle: merged);
+    case AppFontFamily.jetBrainsMono:
+      return GoogleFonts.jetBrainsMono(textStyle: merged);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Semantic tokens
 // ---------------------------------------------------------------------------
@@ -125,7 +188,7 @@ class ShellTokensTheme extends ThemeExtension<ShellTokensTheme> {
 // Build a ThemeData from tokens
 // ---------------------------------------------------------------------------
 
-ThemeData buildTheme(ShellTokens t, Brightness brightness) {
+ThemeData buildTheme(ShellTokens t, Brightness brightness, AppFontFamily fontFamily) {
   return ThemeData(
     brightness: brightness,
     scaffoldBackgroundColor: t.surfaceBase,
@@ -150,7 +213,8 @@ ThemeData buildTheme(ShellTokens t, Brightness brightness) {
       elevation: 0,
       margin: const EdgeInsets.symmetric(vertical: 4),
     ),
-    textTheme: GoogleFonts.ibmPlexMonoTextTheme(
+    textTheme: applyAppFontToTextTheme(
+      fontFamily,
       TextTheme(
         bodyLarge: TextStyle(
           color: t.fgPrimary,
@@ -181,7 +245,8 @@ ThemeData buildTheme(ShellTokens t, Brightness brightness) {
       enabledBorder: InputBorder.none,
       focusedBorder: InputBorder.none,
       contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-      hintStyle: GoogleFonts.ibmPlexMono(
+      hintStyle: appFontStyle(
+        fontFamily,
         color: t.fgHint,
         fontSize: 14,
       ),
@@ -198,10 +263,8 @@ ThemeData buildTheme(ShellTokens t, Brightness brightness) {
 // Theme mode persistence (localStorage)
 // ---------------------------------------------------------------------------
 
-const _storageKey = 'trinity_theme_mode';
-
 ThemeMode loadThemeMode() {
-  final stored = html.window.localStorage[_storageKey];
+  final stored = html.window.localStorage[_themeModeStorageKey];
   switch (stored) {
     case 'dark':
       return ThemeMode.dark;
@@ -215,13 +278,21 @@ ThemeMode loadThemeMode() {
 void saveThemeMode(ThemeMode mode) {
   switch (mode) {
     case ThemeMode.dark:
-      html.window.localStorage[_storageKey] = 'dark';
+      html.window.localStorage[_themeModeStorageKey] = 'dark';
       break;
     case ThemeMode.light:
-      html.window.localStorage[_storageKey] = 'light';
+      html.window.localStorage[_themeModeStorageKey] = 'light';
       break;
     case ThemeMode.system:
-      html.window.localStorage.remove(_storageKey);
+      html.window.localStorage.remove(_themeModeStorageKey);
       break;
   }
+}
+
+AppFontFamily loadAppFontFamily() {
+  return appFontFamilyFromStorage(html.window.localStorage[_fontFamilyStorageKey]);
+}
+
+void saveAppFontFamily(AppFontFamily family) {
+  html.window.localStorage[_fontFamilyStorageKey] = appFontFamilyToStorage(family);
 }
