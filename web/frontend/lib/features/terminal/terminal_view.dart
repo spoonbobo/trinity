@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme.dart';
 import '../../core/terminal_client.dart';
 
@@ -101,8 +102,7 @@ class _TerminalViewState extends State<TerminalView> {
               final output = widget.client.outputs[index];
               return SelectableText(
                 output.data ?? output.message ?? '',
-                style: TextStyle(
-                  fontFamily: 'monofur',
+                style: GoogleFonts.ibmPlexMono(
                   fontSize: 13,
                   color: _getOutputColor(output.type),
                   height: 1.5,
@@ -150,8 +150,7 @@ class _TerminalViewState extends State<TerminalView> {
               children: [
                 Text(
                   '> ',
-                  style: TextStyle(
-                    fontFamily: 'monofur',
+                  style: GoogleFonts.ibmPlexMono(
                     color: widget.client.isConnected
                         ? t.accentPrimary
                         : t.fgDisabled,
@@ -162,8 +161,7 @@ class _TerminalViewState extends State<TerminalView> {
                   child: TextField(
                     controller: _commandController,
                     enabled: widget.client.isConnected && !widget.client.isExecuting,
-                    style: TextStyle(
-                      fontFamily: 'monofur',
+                    style: GoogleFonts.ibmPlexMono(
                       color: t.fgPrimary,
                       fontSize: 14,
                     ),

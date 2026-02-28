@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'dart:html' as html;
 
 // ---------------------------------------------------------------------------
@@ -149,19 +150,28 @@ ThemeData buildTheme(ShellTokens t, Brightness brightness) {
       elevation: 0,
       margin: const EdgeInsets.symmetric(vertical: 4),
     ),
-    textTheme: TextTheme(
-      bodyLarge: TextStyle(
-        fontFamily: 'monofur', color: t.fgPrimary, fontSize: 14, height: 1.5,
-      ),
-      bodyMedium: TextStyle(
-        fontFamily: 'monofur', color: t.fgSecondary, fontSize: 13, height: 1.5,
-      ),
-      titleLarge: TextStyle(
-        fontFamily: 'monofur', color: t.fgPrimary, fontSize: 16,
-        fontWeight: FontWeight.w700, height: 1.4,
-      ),
-      labelSmall: TextStyle(
-        fontFamily: 'monofur', color: t.fgTertiary, fontSize: 11,
+    textTheme: GoogleFonts.ibmPlexMonoTextTheme(
+      TextTheme(
+        bodyLarge: TextStyle(
+          color: t.fgPrimary,
+          fontSize: 14,
+          height: 1.5,
+        ),
+        bodyMedium: TextStyle(
+          color: t.fgSecondary,
+          fontSize: 13,
+          height: 1.5,
+        ),
+        titleLarge: TextStyle(
+          color: t.fgPrimary,
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+          height: 1.4,
+        ),
+        labelSmall: TextStyle(
+          color: t.fgTertiary,
+          fontSize: 11,
+        ),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
@@ -171,8 +181,9 @@ ThemeData buildTheme(ShellTokens t, Brightness brightness) {
       enabledBorder: InputBorder.none,
       focusedBorder: InputBorder.none,
       contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-      hintStyle: TextStyle(
-        fontFamily: 'monofur', color: t.fgHint, fontSize: 14,
+      hintStyle: GoogleFonts.ibmPlexMono(
+        color: t.fgHint,
+        fontSize: 14,
       ),
     ),
     iconTheme: IconThemeData(color: t.accentPrimary, size: 16),

@@ -20,6 +20,7 @@ const ALLOWED_COMMANDS = [
   'doctor',
   'doctor --fix',
   'models',
+  'clawhub',
   'skills',
   'skills list',
   'skills list --json',

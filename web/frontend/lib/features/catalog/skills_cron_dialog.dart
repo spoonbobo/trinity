@@ -6,7 +6,9 @@ import '../shell/shell_page.dart' show terminalClientProvider;
 
 enum CatalogTab { skills, crons }
 
-enum SkillsCategory { ready, notReady, templates }
+enum SkillsCategory { ready, notReady, clawhub, templates }
+
+enum CronCategory { existing, templates }
 
 class SkillsCronDialog extends ConsumerStatefulWidget {
   final CatalogTab initialTab;
@@ -21,11 +23,17 @@ class SkillsCronDialog extends ConsumerStatefulWidget {
 }
 
 class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
+  final TextEditingController _clawhubQueryController = TextEditingController();
   bool _loading = false;
   String? _error;
+  String? _installingSkill;
+  bool _clawhubSearching = false;
+  String? _clawhubError;
+  List<Map<String, String>> _clawhubResults = [];
 
   CatalogTab _tab = CatalogTab.skills;
   SkillsCategory _skillsCategory = SkillsCategory.ready;
+  CronCategory _cronCategory = CronCategory.existing;
 
   List<Map<String, dynamic>> _skills = [];
   List<Map<String, dynamic>> _cronJobs = [];
@@ -41,6 +49,12 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadData();
     });
+  }
+
+  @override
+  void dispose() {
+    _clawhubQueryController.dispose();
+    super.dispose();
   }
 
   Map<String, dynamic> _decodeJsonObject(String raw) {
@@ -123,6 +137,140 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
     }
   }
 
+  Future<void> _installSkill(Map<String, dynamic> row) async {
+    final client = ref.read(terminalClientProvider);
+    final rawName = (row['slug'] ?? row['name'] ?? '').toString().trim();
+    if (rawName.isEmpty) return;
+
+    if (!client.isAuthenticated) {
+      setState(() {
+        _error = 'terminal proxy not connected';
+      });
+      return;
+    }
+
+    setState(() {
+      _installingSkill = rawName;
+      _error = null;
+    });
+
+    try {
+      await client.executeCommandForOutput(
+        'clawhub install $rawName',
+        timeout: const Duration(seconds: 90),
+      );
+      await _loadData();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'failed to install $rawName: $e';
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _installingSkill = null;
+      });
+    }
+  }
+
+  Future<void> _searchClawhub() async {
+    final client = ref.read(terminalClientProvider);
+    final query = _clawhubQueryController.text.trim();
+    if (query.isEmpty) return;
+
+    if (!client.isAuthenticated) {
+      setState(() {
+        _clawhubError = 'terminal proxy not connected';
+      });
+      return;
+    }
+
+    final escaped = query.replaceAll('"', '\\"');
+
+    setState(() {
+      _clawhubSearching = true;
+      _clawhubError = null;
+      _clawhubResults = [];
+    });
+
+    try {
+      final raw = await client.executeCommandForOutput(
+        'clawhub search "$escaped" --limit 20',
+        timeout: const Duration(seconds: 60),
+      );
+
+      final parsed = <Map<String, String>>[];
+      for (final line in raw.split('\n')) {
+        final trimmed = line.trim();
+        if (!trimmed.startsWith('- ')) continue;
+
+        final withoutPrefix = trimmed.substring(2).trim();
+        final scoreStart = withoutPrefix.lastIndexOf('(');
+        final scoreEnd = withoutPrefix.lastIndexOf(')');
+
+        String score = '';
+        String body = withoutPrefix;
+        if (scoreStart > 0 && scoreEnd > scoreStart) {
+          score = withoutPrefix.substring(scoreStart + 1, scoreEnd).trim();
+          body = withoutPrefix.substring(0, scoreStart).trim();
+        }
+
+        if (body.isEmpty) continue;
+        final parts = body.split(RegExp(r'\s{2,}'));
+        final slug = parts.isNotEmpty ? parts.first.trim() : body;
+        final name = parts.length > 1 ? parts.sublist(1).join(' ').trim() : slug;
+        if (slug.isEmpty) continue;
+
+        parsed.add({'slug': slug, 'name': name, 'score': score});
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _clawhubResults = parsed;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _clawhubError = 'search failed: $e';
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _clawhubSearching = false;
+      });
+    }
+  }
+
+  Future<void> _installClawhubSkill(Map<String, String> row) async {
+    final client = ref.read(terminalClientProvider);
+    final slug = (row['slug'] ?? '').trim();
+    if (slug.isEmpty) return;
+
+    setState(() {
+      _installingSkill = slug;
+      _error = null;
+      _clawhubError = null;
+    });
+
+    try {
+      await client.executeCommandForOutput(
+        'clawhub install $slug',
+        timeout: const Duration(seconds: 120),
+      );
+      await _loadData();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _clawhubError = 'failed to install $slug: $e';
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _installingSkill = null;
+      });
+    }
+  }
+
   List<Map<String, dynamic>> _slicePage(List<Map<String, dynamic>> rows, int page) {
     final start = page * _pageSize;
     if (start >= rows.length) return const [];
@@ -145,8 +293,34 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
         return _skills.where((s) => s['eligible'] == true && !_isTemplate(s)).toList();
       case SkillsCategory.notReady:
         return _skills.where((s) => s['eligible'] != true && !_isTemplate(s)).toList();
+      case SkillsCategory.clawhub:
+        return _skills.where((s) {
+          final name = (s['name'] ?? '').toString().toLowerCase();
+          final source = (s['source'] ?? '').toString().toLowerCase();
+          return name.contains('clawhub') || source.contains('clawhub');
+        }).toList();
       case SkillsCategory.templates:
         return _skills.where(_isTemplate).toList();
+    }
+  }
+
+  bool _isCronTemplate(Map<String, dynamic> job) {
+    final source = (job['source'] ?? '').toString().toLowerCase();
+    final kind = (job['kind'] ?? '').toString().toLowerCase();
+    final id = (job['id'] ?? '').toString().toLowerCase();
+    final name = (job['name'] ?? '').toString().toLowerCase();
+    return source.contains('template') ||
+        kind.contains('template') ||
+        id.contains('template') ||
+        name.contains('template');
+  }
+
+  List<Map<String, dynamic>> _cronsForCategory() {
+    switch (_cronCategory) {
+      case CronCategory.existing:
+        return _cronJobs.where((j) => !_isCronTemplate(j)).toList();
+      case CronCategory.templates:
+        return _cronJobs.where(_isCronTemplate).toList();
     }
   }
 
@@ -156,11 +330,12 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
     final theme = Theme.of(context);
 
     final categoryRows = _skillsForCategory();
+    final cronCategoryRows = _cronsForCategory();
     final skillsPages = (categoryRows.length / _pageSize).ceil().clamp(1, 9999);
-    final cronPages = (_cronJobs.length / _pageSize).ceil().clamp(1, 9999);
+    final cronPages = (cronCategoryRows.length / _pageSize).ceil().clamp(1, 9999);
 
     final skillsPageRows = _slicePage(categoryRows, _skillsPage);
-    final cronPageRows = _slicePage(_cronJobs, _cronPage);
+    final cronPageRows = _slicePage(cronCategoryRows, _cronPage);
 
     return Dialog(
       backgroundColor: t.surfaceBase,
@@ -222,16 +397,17 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
               ),
             ),
             Expanded(
-              child: _tab == CatalogTab.skills
-                  ? _buildSkillsView(
-                      skillsPageRows: skillsPageRows,
-                      pages: skillsPages,
-                      totalRows: categoryRows.length,
-                    )
-                  : _buildCronsView(
-                      cronPageRows: cronPageRows,
-                      pages: cronPages,
-                    ),
+                child: _tab == CatalogTab.skills
+                    ? _buildSkillsView(
+                        skillsPageRows: skillsPageRows,
+                        pages: skillsPages,
+                        totalRows: categoryRows.length,
+                      )
+                    : _buildCronsView(
+                        cronPageRows: cronPageRows,
+                        pages: cronPages,
+                        totalRows: cronCategoryRows.length,
+                      ),
             ),
           ],
         ),
@@ -271,6 +447,13 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
                 });
               }),
               const SizedBox(width: 10),
+              _categoryToggle('clawhub', _skillsCategory == SkillsCategory.clawhub, () {
+                setState(() {
+                  _skillsCategory = SkillsCategory.clawhub;
+                  _skillsPage = 0;
+                });
+              }),
+              const SizedBox(width: 10),
               _categoryToggle('templates', _skillsCategory == SkillsCategory.templates, () {
                 setState(() {
                   _skillsCategory = SkillsCategory.templates;
@@ -301,18 +484,116 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
           ),
         ),
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            children: skillsPageRows.map(_skillRow).toList(),
-          ),
+          child: _skillsCategory == SkillsCategory.clawhub
+              ? _buildClawhubSearchView()
+              : ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  children: skillsPageRows.map(_skillRow).toList(),
+                ),
         ),
       ],
+    );
+  }
+
+  Widget _buildClawhubSearchView() {
+    final t = ShellTokens.of(context);
+    final theme = Theme.of(context);
+
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: t.border, width: 0.5)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _clawhubQueryController,
+                  decoration: const InputDecoration(
+                    hintText: 'search clawhub skills',
+                  ),
+                  onSubmitted: (_) => _searchClawhub(),
+                ),
+              ),
+              const SizedBox(width: 10),
+              GestureDetector(
+                onTap: _clawhubSearching ? null : _searchClawhub,
+                child: Text(
+                  _clawhubSearching ? 'searching...' : 'search',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: _clawhubSearching ? t.fgDisabled : t.accentPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (_clawhubError != null)
+          Padding(
+            padding: const EdgeInsets.all(10),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                _clawhubError!,
+                style: theme.textTheme.bodyMedium?.copyWith(color: t.statusError),
+              ),
+            ),
+          ),
+        Expanded(
+          child: _clawhubResults.isEmpty
+              ? Center(
+                  child: Text(
+                    _clawhubSearching ? 'searching...' : 'search to discover skills',
+                    style: theme.textTheme.bodyMedium?.copyWith(color: t.fgPlaceholder),
+                  ),
+                )
+              : ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  children: _clawhubResults.map(_clawhubRow).toList(),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _clawhubRow(Map<String, String> row) {
+    final t = ShellTokens.of(context);
+    final theme = Theme.of(context);
+    final slug = (row['slug'] ?? '').trim();
+    final name = (row['name'] ?? slug).trim();
+    final score = (row['score'] ?? '').trim();
+    final installing = _installingSkill == slug;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              score.isEmpty ? '$slug  $name' : '$slug  $name  ($score)',
+              style: theme.textTheme.bodyMedium?.copyWith(color: t.fgPrimary),
+            ),
+          ),
+          GestureDetector(
+            onTap: installing ? null : () => _installClawhubSkill(row),
+            child: Text(
+              installing ? 'installing...' : 'install',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: installing ? t.fgDisabled : t.accentPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildCronsView({
     required List<Map<String, dynamic>> cronPageRows,
     required int pages,
+    required int totalRows,
   }) {
     final t = ShellTokens.of(context);
     final theme = Theme.of(context);
@@ -328,9 +609,23 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
           child: Row(
             children: [
               Text(
-                'cron jobs (${_cronJobs.length})',
+                'cron jobs ($totalRows)',
                 style: theme.textTheme.bodyMedium?.copyWith(color: t.fgPrimary),
               ),
+              const SizedBox(width: 12),
+              _categoryToggle('existing', _cronCategory == CronCategory.existing, () {
+                setState(() {
+                  _cronCategory = CronCategory.existing;
+                  _cronPage = 0;
+                });
+              }),
+              const SizedBox(width: 10),
+              _categoryToggle('templates', _cronCategory == CronCategory.templates, () {
+                setState(() {
+                  _cronCategory = CronCategory.templates;
+                  _cronPage = 0;
+                });
+              }),
               const Spacer(),
               Text(
                 '${_cronPage + 1}/$pages',
@@ -348,7 +643,7 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
           ),
         ),
         Expanded(
-          child: _cronJobs.isEmpty
+          child: totalRows == 0
               ? Padding(
                   padding: const EdgeInsets.all(12),
                   child: Text(
@@ -413,18 +708,44 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
     final ready = row['eligible'] == true;
     final name = (row['name'] ?? 'unknown').toString();
     final desc = (row['description'] ?? '').toString();
+    final canInstall = !ready;
+    final installing = _installingSkill == name;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '${ready ? 'ready' : 'missing'}  $name',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ready ? t.accentPrimary : t.fgMuted,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${ready ? 'ready' : 'missing'}  $name',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: ready ? t.accentPrimary : t.fgMuted,
+                  ),
+                ),
+              ),
+              if (canInstall)
+                GestureDetector(
+                  onTap: installing ? null : () => _installSkill(row),
+                  child: Text(
+                    installing ? 'installing...' : 'install',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: installing ? t.fgDisabled : t.accentPrimary,
+                    ),
+                  ),
+                ),
+            ],
           ),
+          if (!canInstall && _skillsCategory == SkillsCategory.templates)
+            Text(
+              'template',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: t.fgTertiary,
+                fontSize: 10,
+              ),
+            ),
           if (desc.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(left: 14),

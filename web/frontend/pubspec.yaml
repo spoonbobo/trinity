@@ -16,6 +16,7 @@ dependencies:
   uuid: ^4.5.1
   json_annotation: ^4.9.0
   flutter_markdown: ^0.7.6
+  google_fonts: ^6.2.1
 
 dev_dependencies:
   flutter_test:

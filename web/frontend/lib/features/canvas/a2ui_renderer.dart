@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme.dart';
 import '../../models/a2ui_models.dart';
 import '../../models/ws_frame.dart';
@@ -298,7 +299,7 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
           ),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         ),
-        child: Text(label, style: const TextStyle(fontFamily: 'monofur')),
+        child: Text(label, style: GoogleFonts.ibmPlexMono()),
       ),
     );
   }

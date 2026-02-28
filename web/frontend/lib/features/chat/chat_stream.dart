@@ -501,62 +501,113 @@ class _AssistantBubble extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Flexible(
-            child: MarkdownBody(
-              data: entry.content,
-              selectable: true,
-              styleSheet: MarkdownStyleSheet(
-                p: baseStyle,
-                h1: baseStyle.copyWith(fontSize: 16, fontWeight: FontWeight.bold, color: t.fgPrimary),
-                h2: baseStyle.copyWith(fontSize: 15, fontWeight: FontWeight.bold, color: t.fgPrimary),
-                h3: baseStyle.copyWith(fontSize: 14, fontWeight: FontWeight.bold),
-                code: baseStyle.copyWith(fontSize: 13, color: t.accentPrimary, backgroundColor: t.surfaceCodeInline),
-                codeblockDecoration: BoxDecoration(
-                  color: t.surfaceBase,
-                  border: Border(left: BorderSide(color: t.border, width: 2)),
-                ),
-                codeblockPadding: const EdgeInsets.only(left: 12, top: 8, bottom: 8, right: 8),
-                blockquoteDecoration: BoxDecoration(
-                  border: Border(left: BorderSide(color: t.fgDisabled, width: 2)),
-                ),
-                blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
-                listBullet: baseStyle.copyWith(color: t.fgTertiary),
-                strong: baseStyle.copyWith(fontWeight: FontWeight.bold),
-                em: baseStyle.copyWith(fontStyle: FontStyle.italic),
-                a: baseStyle.copyWith(
-                  color: t.accentPrimary,
-                  decoration: TextDecoration.underline,
-                  decorationColor: t.accentPrimaryMuted,
-                ),
-                tableHead: baseStyle.copyWith(fontWeight: FontWeight.bold),
-                tableBorder: TableBorder.all(color: t.border, width: 0.5),
-                tableHeadAlign: TextAlign.left,
-                tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                horizontalRuleDecoration: BoxDecoration(
-                  border: Border(top: BorderSide(color: t.border, width: 0.5)),
-                ),
+          MarkdownBody(
+            data: entry.content,
+            selectable: true,
+            styleSheet: MarkdownStyleSheet(
+              p: baseStyle,
+              h1: baseStyle.copyWith(fontSize: 16, fontWeight: FontWeight.bold, color: t.fgPrimary),
+              h2: baseStyle.copyWith(fontSize: 15, fontWeight: FontWeight.bold, color: t.fgPrimary),
+              h3: baseStyle.copyWith(fontSize: 14, fontWeight: FontWeight.bold),
+              code: baseStyle.copyWith(fontSize: 13, color: t.accentPrimary, backgroundColor: t.surfaceCodeInline),
+              codeblockDecoration: BoxDecoration(
+                color: t.surfaceBase,
+                border: Border(left: BorderSide(color: t.border, width: 2)),
               ),
-              onTapLink: (text, href, title) {
-                if (href != null) {
-                  Clipboard.setData(ClipboardData(text: href));
-                }
-              },
+              codeblockPadding: const EdgeInsets.only(left: 12, top: 8, bottom: 8, right: 8),
+              blockquoteDecoration: BoxDecoration(
+                border: Border(left: BorderSide(color: t.fgDisabled, width: 2)),
+              ),
+              blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
+              listBullet: baseStyle.copyWith(color: t.fgTertiary),
+              strong: baseStyle.copyWith(fontWeight: FontWeight.bold),
+              em: baseStyle.copyWith(fontStyle: FontStyle.italic),
+              a: baseStyle.copyWith(
+                color: t.accentPrimary,
+                decoration: TextDecoration.underline,
+                decorationColor: t.accentPrimaryMuted,
+              ),
+              tableHead: baseStyle.copyWith(fontWeight: FontWeight.bold),
+              tableBorder: TableBorder.all(color: t.border, width: 0.5),
+              tableHeadAlign: TextAlign.left,
+              tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              horizontalRuleDecoration: BoxDecoration(
+                border: Border(top: BorderSide(color: t.border, width: 0.5)),
+              ),
             ),
+            onTapLink: (text, href, title) {
+              if (href != null) {
+                Clipboard.setData(ClipboardData(text: href));
+              }
+            },
           ),
           if (entry.isStreaming)
-            Padding(
-              padding: const EdgeInsets.only(left: 2, top: 3),
-              child: SizedBox(
-                width: 8,
-                height: 14,
-                child: _CursorBlink(),
-              ),
+            const Padding(
+              padding: EdgeInsets.only(top: 2),
+              child: _StreamingIndicator(),
             ),
         ],
       ),
+    );
+  }
+}
+
+class _StreamingIndicator extends StatefulWidget {
+  const _StreamingIndicator();
+
+  @override
+  State<_StreamingIndicator> createState() => _StreamingIndicatorState();
+}
+
+class _StreamingIndicatorState extends State<_StreamingIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = ShellTokens.of(context);
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final phase = _controller.value;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(3, (index) {
+            final offset = (phase - (index * 0.2)) % 1.0;
+            final pulse = (1.0 - (offset - 0.5).abs() * 2.0).clamp(0.0, 1.0);
+            final opacity = 0.25 + (pulse * 0.55);
+            return Padding(
+              padding: EdgeInsets.only(right: index == 2 ? 0 : 4),
+              child: Container(
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: t.accentPrimary.withOpacity(opacity),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            );
+          }),
+        );
+      },
     );
   }
 }
