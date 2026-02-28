@@ -11,6 +11,8 @@ services:
       - "18789:18789"
     volumes:
       - openclaw-data:/home/node/.openclaw
+      - ./skills:/home/node/.openclaw/skills
+      - ./agents:/home/node/.openclaw/agents
     env_file:
       - .env
     environment:
