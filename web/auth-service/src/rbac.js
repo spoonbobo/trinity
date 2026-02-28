@@ -78,11 +78,32 @@ async function getAuditLog(limit = 100, offset = 0) {
   return result.rows;
 }
 
+async function findRoleIdByName(roleName) {
+  const result = await pool.query(
+    'SELECT id FROM rbac.roles WHERE name = $1 LIMIT 1',
+    [roleName]
+  );
+  return result.rows[0]?.id || null;
+}
+
+async function ensureRole(userId, roleName, grantedBy = null) {
+  const roleId = await findRoleIdByName(roleName);
+  if (!roleId) throw new Error(`Role not found: ${roleName}`);
+
+  await pool.query(
+    `INSERT INTO rbac.user_roles (user_id, role_id, granted_by)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_id, role_id) DO NOTHING`,
+    [userId, roleId, grantedBy]
+  );
+}
+
 module.exports = {
   getEffectivePermissions,
   hasPermission,
   getUserRoleName,
   assignRole,
+  ensureRole,
   ensureUserRole,
   listUsers,
   writeAuditLog,

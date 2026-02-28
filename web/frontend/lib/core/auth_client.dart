@@ -130,7 +130,7 @@ class AuthClient extends ChangeNotifier {
 
   Future<void> loginWithEmail(String email, String password) async {
     // Call GoTrue signup/signin
-    final uri = Uri.parse('$authServiceBaseUrl/supabase/auth/v1/token?grant_type=password');
+    final uri = Uri.parse('$authServiceBaseUrl/supabase/auth/token?grant_type=password');
     final request = html.HttpRequest();
     request.open('POST', uri.toString());
     request.setRequestHeader('Content-Type', 'application/json');
@@ -147,7 +147,7 @@ class AuthClient extends ChangeNotifier {
   }
 
   Future<void> signUpWithEmail(String email, String password) async {
-    final uri = Uri.parse('$authServiceBaseUrl/supabase/auth/v1/signup');
+    final uri = Uri.parse('$authServiceBaseUrl/supabase/auth/signup');
     final request = html.HttpRequest();
     request.open('POST', uri.toString());
     request.setRequestHeader('Content-Type', 'application/json');
@@ -222,7 +222,7 @@ class AuthClient extends ChangeNotifier {
   }
 
   String getKeycloakLoginUrl() {
-    return '$authServiceBaseUrl/supabase/auth/v1/authorize?provider=keycloak';
+    return '$authServiceBaseUrl/supabase/auth/authorize?provider=keycloak';
   }
 
   Future<String> _createRequestCompleter(html.HttpRequest request) {

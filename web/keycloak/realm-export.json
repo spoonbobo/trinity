@@ -21,6 +21,17 @@
         "post.logout.redirect.uris": "http://localhost/*"
       }
     }
+    ,
+    {
+      "clientId": "account",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["*"],
+      "webOrigins": ["*"]
+    }
   ],
   "roles": {
     "realm": [

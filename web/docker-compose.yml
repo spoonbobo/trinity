@@ -62,6 +62,13 @@ services:
       KC_HEALTH_ENABLED: "true"
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-a34013d0f1e1edfc7407c769}
+      AUTHENTIK_ENABLED: ${AUTHENTIK_ENABLED:-false}
+      AUTHENTIK_ISSUER_URL: ${AUTHENTIK_ISSUER_URL:-}
+      AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID:-}
+      AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:-}
+      AUTHENTIK_SCOPES: ${AUTHENTIK_SCOPES:-openid profile email groups}
+      AUTHENTIK_GROUPS_MAPPER_ENABLED: ${AUTHENTIK_GROUPS_MAPPER_ENABLED:-true}
+      AUTHENTIK_DEFAULT_GROUP_VALUE: ${AUTHENTIK_DEFAULT_GROUP_VALUE:-trinity_user}
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://supabase-db:5432/supabase
       KC_DB_USERNAME: postgres
@@ -76,6 +83,32 @@ services:
     networks:
       - trinity
 
+  keycloak-idp-bootstrap:
+    image: quay.io/keycloak/keycloak:26.1
+    container_name: trinity-keycloak-idp-bootstrap
+    restart: "no"
+    depends_on:
+      keycloak:
+        condition: service_started
+    environment:
+      KEYCLOAK_SERVER_URL: http://keycloak:8080/keycloak
+      KEYCLOAK_REALM: trinity
+      KEYCLOAK_ADMIN_REALM: master
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-a34013d0f1e1edfc7407c769}
+      AUTHENTIK_ENABLED: ${AUTHENTIK_ENABLED:-false}
+      AUTHENTIK_ISSUER_URL: ${AUTHENTIK_ISSUER_URL:-}
+      AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID:-}
+      AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:-}
+      AUTHENTIK_SCOPES: ${AUTHENTIK_SCOPES:-openid profile email groups}
+      AUTHENTIK_GROUPS_MAPPER_ENABLED: ${AUTHENTIK_GROUPS_MAPPER_ENABLED:-true}
+      AUTHENTIK_DEFAULT_GROUP_VALUE: ${AUTHENTIK_DEFAULT_GROUP_VALUE:-trinity_user}
+    volumes:
+      - ./keycloak/configure-authentik-idp.sh:/opt/keycloak/bin/configure-authentik-idp.sh:ro
+    entrypoint: ["/bin/sh", "/opt/keycloak/bin/configure-authentik-idp.sh"]
+    networks:
+      - trinity
+
   # ─── Auth Service (JWT verify + RBAC resolution) ───────────────────────
   auth-service:
     build:
@@ -86,6 +119,11 @@ services:
     environment:
       AUTH_SERVICE_PORT: 18791
       JWT_SECRET: ${SUPABASE_JWT_SECRET:-9e2254f6b1dccfe9db011eedba5a7c67e7fccc0d2d4b12b08f7f0cb8525a0f32}
+      SUPABASE_AUTH_URL: http://supabase-auth:9999
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzcyMjcwMDU0LCJleHAiOjE5Mjk5NTAwNTR9.U1xu4Was-iunrn8oXeA-2n8hMpCgcDVhiGXxndiB3TU}
+      ENABLE_DEFAULT_SUPERADMIN: "true"
+      DEFAULT_SUPERADMIN_EMAIL: admin@trinity.local
+      DEFAULT_SUPERADMIN_PASSWORD: admin
       POSTGRES_HOST: supabase-db
       POSTGRES_PORT: 5432
       POSTGRES_DB: supabase
@@ -178,6 +216,8 @@ services:
         condition: service_started
       supabase-auth:
         condition: service_started
+      keycloak-idp-bootstrap:
+        condition: service_completed_successfully
     networks:
       - trinity
 

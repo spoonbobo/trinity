@@ -44,7 +44,7 @@ export const translations: Record<Locale, TranslationStrings> = {
     hero: {
       h1a: "Nothing ships.",
       h1b: "Everything emerges.",
-      desc: "An empty screen. A single intelligence. Every person who connects teaches it something new. The app doesn\u2019t exist until you speak.",
+      desc: "An empty screen. A single intelligence. Every person who connects teaches it something new. The system doesn\u2019t exist until you speak.",
       cta: "SEE HOW IT WORKS",
       tagline: "PRIVATE CONVERSATIONS. COLLECTIVE WISDOM.",
       pillars: [
@@ -56,7 +56,7 @@ export const translations: Record<Locale, TranslationStrings> = {
         {
           icon: "\u2666",
           label: "BUILT BY CONVERSATION",
-          desc: "You describe what you need. The agent builds it in real time.",
+          desc: "You describe what you need. The agent assembles it in real time.",
         },
         {
           icon: "\u2731",
@@ -77,7 +77,7 @@ export const translations: Record<Locale, TranslationStrings> = {
         },
         {
           num: "02",
-          title: "You speak. It builds.",
+          title: "You speak. It materializes.",
           desc: "Ask for anything \u2014 a tracker, a workflow, a tool. The agent generates the interface on the fly. No code. No config. Just intent.",
         },
         {
@@ -104,14 +104,14 @@ export const translations: Record<Locale, TranslationStrings> = {
     },
     why: {
       label: "WHY IT MATTERS",
-      h2a: "Every other app is",
+      h2a: "Every fixed product is",
       h2b: "a cage.",
       subtitle: "Software today is someone else\u2019s opinion of what you need, frozen in code, behind a subscription. Trinity flips that entirely.",
       cards: [
         {
           icon: "\u2716",
           title: "Kills the feature roadmap",
-          desc: "No team debates what to build next. Every user gets a different app shaped by their own needs. There\u2019s no one-size-fits-all because there\u2019s no size at all.",
+          desc: "No team debates what to build next. Every user gets a different workspace shaped by their own needs. There\u2019s no one-size-fits-all because there\u2019s no fixed mold at all.",
         },
         {
           icon: "\u2261",
@@ -139,7 +139,7 @@ export const translations: Record<Locale, TranslationStrings> = {
           desc: "Same brain on the web shell, WhatsApp, Telegram, Discord, mobile nodes. The command center is for complex tasks. For quick ones, just text it from your phone.",
         },
       ],
-      quote: "\u201COnce you internalize this model, every traditional app feels like an unnecessary constraint. Why use a pre-built tool with someone else\u2019s limitations when you can just describe what you want and have it materialize?\u201D",
+      quote: "\u201COnce you internalize this model, every fixed product feels like an unnecessary constraint. Why accept someone else\u2019s limits when you can describe what you want and watch it materialize?\u201D",
     },
   },
 

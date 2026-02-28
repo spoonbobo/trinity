@@ -17,7 +17,7 @@ const spaceGrotesk = Space_Grotesk({
 export const metadata: Metadata = {
   title: "Trinity AGI — One Brain. Every User.",
   description:
-    "An empty screen. A single intelligence. Every person who connects teaches it something new. Private conversations, collective wisdom. The app doesn't exist until you speak.",
+    "An empty screen. A single intelligence. Every person who connects teaches it something new. Private conversations, collective wisdom. The system doesn't exist until you speak.",
   openGraph: {
     title: "Trinity AGI — One Brain. Every User.",
     description:

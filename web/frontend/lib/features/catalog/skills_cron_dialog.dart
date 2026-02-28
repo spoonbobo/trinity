@@ -67,7 +67,8 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
   }
 
   Map<String, dynamic> _decodeJsonObject(String raw) {
-    final trimmed = raw.trim();
+    final stripped = _stripAnsi(raw);
+    final trimmed = stripped.trim();
     if (trimmed.isEmpty) return <String, dynamic>{};
     try {
       final parsed = jsonDecode(trimmed);
@@ -339,14 +340,15 @@ class _SkillsCronDialogState extends ConsumerState<SkillsCronDialog> {
       final cleaned = _stripAnsi(raw).trim();
       // Find the first '{' to skip any leading text like "- Fetching skill"
       final jsonStart = cleaned.indexOf('{');
-      if (jsonStart < 0) {
+      final jsonEnd = cleaned.lastIndexOf('}');
+      if (jsonStart < 0 || jsonEnd < jsonStart) {
         if (!mounted) return;
         setState(() {
           _inspectingSkill = null;
         });
         return;
       }
-      final jsonStr = cleaned.substring(jsonStart);
+      final jsonStr = cleaned.substring(jsonStart, jsonEnd + 1);
       final data = jsonDecode(jsonStr) as Map<String, dynamic>;
 
       if (!mounted) return;
