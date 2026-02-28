@@ -56,35 +56,50 @@ class GatewayClient extends ChangeNotifier {
     }
   }
 
-  void _onMessage(dynamic raw) {
-    debugPrint('[GW] raw: ${(raw as String).length > 300 ? raw.substring(0, 300) : raw}');
-    final frame = WsFrame.parse(raw);
+  bool _disposed = false;
 
-    switch (frame.type) {
-      case FrameType.event:
-        final event = frame.event!;
-        debugPrint('[GW] event: ${event.event}');
-        if (event.event == 'connect.challenge') {
-          _handleChallenge(event);
-        } else {
-          _eventController.add(event);
-        }
-        break;
-      case FrameType.res:
-        final response = frame.response!;
-        debugPrint('[GW] res: id=${response.id} ok=${response.ok}');
-        final completer = _responseCompleters.remove(response.id);
-        if (completer != null) {
-          completer.complete(response);
-        }
-        if (response.ok &&
-            response.payload?['type'] == 'hello-ok') {
-          _state = ConnectionState.connected;
-          notifyListeners();
-        }
-        break;
-      case FrameType.req:
-        break;
+  /// Only forward events the shell knows how to handle.
+  static const _handledEvents = {
+    'chat', 'agent', 'a2ui', 'canvas',
+    'exec.approval.requested', 'tick',
+  };
+  bool _isHandledEvent(String name) =>
+      _handledEvents.contains(name) || name.startsWith('canvas.');
+
+  void _onMessage(dynamic raw) {
+    try {
+      final rawStr = raw as String;
+      debugPrint('[GW] raw: ${rawStr.length > 300 ? rawStr.substring(0, 300) : rawStr}');
+      final frame = WsFrame.parse(rawStr);
+
+      switch (frame.type) {
+        case FrameType.event:
+          final event = frame.event!;
+          debugPrint('[GW] event: ${event.event}');
+          if (event.event == 'connect.challenge') {
+            _handleChallenge(event);
+          } else if (_isHandledEvent(event.event)) {
+            if (!_disposed) _eventController.add(event);
+          }
+          break;
+        case FrameType.res:
+          final response = frame.response!;
+          debugPrint('[GW] res: id=${response.id} ok=${response.ok}');
+          final completer = _responseCompleters.remove(response.id);
+          if (completer != null) {
+            completer.complete(response);
+          }
+          if (response.ok &&
+              response.payload?['type'] == 'hello-ok') {
+            _state = ConnectionState.connected;
+            notifyListeners();
+          }
+          break;
+        case FrameType.req:
+          break;
+      }
+    } catch (e, st) {
+      debugPrint('[GW] error processing message: $e\n$st');
     }
   }
 
@@ -132,10 +147,12 @@ class GatewayClient extends ChangeNotifier {
   /// Send a chat message to the agent.
   Future<WsResponse> sendChatMessage(String message,
       {String sessionKey = 'main'}) {
-    _eventController.add(WsEvent(
-      event: 'chat',
-      payload: {'type': 'message', 'role': 'user', 'content': message},
-    ));
+    if (!_disposed) {
+      _eventController.add(WsEvent(
+        event: 'chat',
+        payload: {'type': 'message', 'role': 'user', 'content': message},
+      ));
+    }
     return sendRequest('chat.send', {
       'message': message,
       'sessionKey': sessionKey,
@@ -169,6 +186,10 @@ class GatewayClient extends ChangeNotifier {
     });
   }
 
+  void emitCanvasEvent(WsEvent event) {
+    if (!_disposed) _eventController.add(event);
+  }
+
   void _onError(dynamic error) {
     _state = ConnectionState.error;
     notifyListeners();
@@ -189,6 +210,7 @@ class GatewayClient extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     disconnect();
     _eventController.close();
     super.dispose();

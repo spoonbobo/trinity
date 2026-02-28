@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/gateway_client.dart' as gw;
 import '../../models/ws_frame.dart';
@@ -74,18 +77,21 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
     try {
       final response = await client.getChatHistory(limit: 50);
       if (response.ok && response.payload != null) {
-        final messages = response.payload!['messages'] as List<dynamic>?;
-        if (messages != null) {
+        final messages = response.payload?['messages'];
+        if (messages is List) {
           setState(() {
             _entries.clear();
             for (final msg in messages) {
-              final m = msg as Map<String, dynamic>;
+              if (msg is! Map<String, dynamic>) continue;
               _entries.add(ChatEntry(
-                role: m['role'] as String? ?? 'system',
-                content: m['content'] as String? ?? '',
+                role: msg['role'] as String? ?? 'system',
+                content: msg['content'] as String? ?? '',
               ));
             }
           });
+          // Seed _lastCanvasSurface from history so the poll doesn't
+          // re-render stale surfaces from previous runs.
+          _seedLastCanvasSurface(messages);
           _scrollToBottom();
         }
       }
@@ -94,7 +100,37 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
     }
   }
 
+  void _seedLastCanvasSurface(List<dynamic> messages) {
+    for (int i = messages.length - 1; i >= 0; i--) {
+      final msg = messages[i];
+      if (msg is! Map<String, dynamic>) continue;
+      final role = msg['role'] as String?;
+      if (role != 'tool' && role != 'toolResult') continue;
+      final contentList = msg['content'];
+      if (contentList is! List) continue;
+      for (final block in contentList) {
+        if (block is! Map<String, dynamic>) continue;
+        final text = block['text'] as String?;
+        if (text != null && text.startsWith('__A2UI__')) {
+          _lastCanvasSurface = text;
+          // Also render it to the canvas so the last surface shows on load
+          _handleA2UIToolResult(text);
+          return;
+        }
+      }
+    }
+  }
+
   void _handleChatEvent(WsEvent event) {
+    try {
+      _handleChatEventInner(event);
+    } catch (e, st) {
+      debugPrint('[Chat] error handling event: $e\n$st');
+    }
+    _scrollToBottom();
+  }
+
+  void _handleChatEventInner(WsEvent event) {
     final payload = event.payload;
 
     if (event.event == 'chat') {
@@ -107,54 +143,68 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
           _entries.add(ChatEntry(role: 'user', content: content));
         });
       } else if (state == 'delta' || state == 'final') {
-        final message = payload['message'] as Map<String, dynamic>?;
-        if (message != null) {
-          final contentList = message['content'] as List<dynamic>?;
-          if (contentList != null && contentList.isNotEmpty) {
-            final first = contentList[0] as Map<String, dynamic>;
-            final text = first['text'] as String? ?? '';
-            if (state == 'final') {
-              setState(() {
-                _agentThinking = false;
-                if (_entries.isNotEmpty && _entries.last.role == 'assistant') {
-                  _entries[_entries.length - 1] = _entries.last.copyWith(
-                    content: text,
-                    isStreaming: false,
-                  );
-                } else {
-                  _entries.add(ChatEntry(role: 'assistant', content: text));
-                }
-              });
+        final message = payload['message'];
+        if (message is! Map<String, dynamic>) return;
+        final contentList = message['content'];
+        if (contentList is! List || contentList.isEmpty) return;
+        final first = contentList[0];
+        if (first is! Map<String, dynamic>) return;
+        final text = first['text'] as String? ?? '';
+        if (state == 'final') {
+          setState(() {
+            _agentThinking = false;
+            if (_entries.isNotEmpty && _entries.last.role == 'assistant') {
+              _entries[_entries.length - 1] = _entries.last.copyWith(
+                content: text,
+                isStreaming: false,
+              );
             } else {
-              setState(() {
-                _agentThinking = false;
-                if (_entries.isNotEmpty &&
-                    _entries.last.role == 'assistant' &&
-                    _entries.last.isStreaming) {
-                  _entries[_entries.length - 1] = _entries.last.copyWith(
-                    content: text,
-                    isStreaming: true,
-                  );
-                } else {
-                  _entries.add(ChatEntry(
-                    role: 'assistant',
-                    content: text,
-                    isStreaming: true,
-                  ));
-                }
-              });
+              _entries.add(ChatEntry(role: 'assistant', content: text));
             }
-          }
+          });
+        } else {
+          setState(() {
+            _agentThinking = false;
+            if (_entries.isNotEmpty &&
+                _entries.last.role == 'assistant' &&
+                _entries.last.isStreaming) {
+              _entries[_entries.length - 1] = _entries.last.copyWith(
+                content: text,
+                isStreaming: true,
+              );
+            } else {
+              _entries.add(ChatEntry(
+                role: 'assistant',
+                content: text,
+                isStreaming: true,
+              ));
+            }
+          });
         }
       }
     } else if (event.event == 'agent') {
       final stream = payload['stream'] as String?;
-      final data = payload['data'] as Map<String, dynamic>?;
+      final data = payload['data'];
+      final dataMap = data is Map<String, dynamic> ? data : null;
+
+      // Detect tool call seq gap: lifecycle start is seq 1.
+      // If first assistant event has seq >= 3, tool calls happened in between.
+      if (stream == 'assistant' && _currentRunFirstAssistantSeq == null) {
+        final seq = payload['seq'];
+        if (seq is int) {
+          _currentRunFirstAssistantSeq = seq;
+          if (seq >= 3) {
+            _currentRunHadToolGap = true;
+          }
+        }
+      }
 
       if (stream == 'lifecycle') {
-        final phase = data?['phase'] as String?;
+        final phase = dataMap?['phase'] as String?;
         if (phase == 'start') {
           setState(() => _agentThinking = true);
+          _currentRunHadToolGap = false;
+          _currentRunFirstAssistantSeq = null;
         } else if (phase == 'end') {
           setState(() {
             _agentThinking = false;
@@ -163,36 +213,81 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
                   _entries.last.copyWith(isStreaming: false);
             }
           });
-        }
-      } else if (stream == 'tool_call') {
-        final toolName = data?['tool'] as String? ??
-            data?['name'] as String? ??
-            'tool';
-        final args = data?['args']?.toString() ?? '';
-        setState(() {
-          _entries.add(ChatEntry(
-            role: 'tool',
-            content: args,
-            toolName: toolName,
-            isStreaming: true,
-          ));
-        });
-      } else if (stream == 'tool_result') {
-        final result = data?['result']?.toString() ??
-            data?['output']?.toString() ??
-            '';
-        setState(() {
-          if (_entries.isNotEmpty && _entries.last.role == 'tool') {
-            _entries[_entries.length - 1] = _entries.last.copyWith(
-              content: result,
-              isStreaming: false,
-            );
+          // Only poll for canvas surface if tool calls were detected (seq gap)
+          if (_currentRunHadToolGap) {
+            _pollCanvasSurface();
           }
-        });
+        }
+      } else if (stream == 'tool_call' || stream == 'tool') {
+        // Handle both tool_call (legacy) and tool (current gateway) stream names
+        final toolName = dataMap?['tool'] as String? ??
+            dataMap?['name'] as String? ??
+            'tool';
+        final phase = dataMap?['phase'] as String?;
+        final result = dataMap?['result']?.toString() ??
+            dataMap?['output']?.toString() ??
+            '';
+
+        if (phase == 'end' || phase == 'result') {
+          // Tool finished — check for A2UI marker
+          if (result.startsWith('__A2UI__')) {
+            _handleA2UIToolResult(result);
+            setState(() {
+              if (_entries.isNotEmpty && _entries.last.role == 'tool') {
+                _entries[_entries.length - 1] = _entries.last.copyWith(
+                  content: 'Surface rendered in Canvas',
+                  isStreaming: false,
+                );
+              }
+            });
+          } else {
+            setState(() {
+              if (_entries.isNotEmpty && _entries.last.role == 'tool') {
+                _entries[_entries.length - 1] = _entries.last.copyWith(
+                  content: result.isNotEmpty ? result : 'Done',
+                  isStreaming: false,
+                );
+              }
+            });
+          }
+        } else {
+          // Tool started or in progress
+          final args = dataMap?['args']?.toString() ?? '';
+          setState(() {
+            _entries.add(ChatEntry(
+              role: 'tool',
+              content: args,
+              toolName: toolName,
+              isStreaming: true,
+            ));
+          });
+        }
+      } else if (stream == 'tool_result') {
+        final result = dataMap?['result']?.toString() ??
+            dataMap?['output']?.toString() ??
+            '';
+        if (result.startsWith('__A2UI__')) {
+          _handleA2UIToolResult(result);
+          setState(() {
+            if (_entries.isNotEmpty && _entries.last.role == 'tool') {
+              _entries[_entries.length - 1] = _entries.last.copyWith(
+                content: 'Surface rendered in Canvas',
+                isStreaming: false,
+              );
+            }
+          });
+        } else {
+          setState(() {
+            if (_entries.isNotEmpty && _entries.last.role == 'tool') {
+              _entries[_entries.length - 1] = _entries.last.copyWith(
+                content: result,
+                isStreaming: false,
+              );
+            }
+          });
+        }
       }
     }
-
-    _scrollToBottom();
   }
 
   void _appendAssistantContent(String content, {bool streaming = false}) {
@@ -213,6 +308,71 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
         ));
       }
     });
+  }
+
+  String? _lastCanvasSurface;
+  bool _currentRunHadToolGap = false;
+  int? _currentRunFirstAssistantSeq;
+
+  Future<void> _pollCanvasSurface() async {
+    try {
+      final client = ref.read(gatewayClientProvider);
+      // Fetch recent history and scan for __A2UI__ in tool results
+      final response = await client.getChatHistory(limit: 10);
+      if (!response.ok || response.payload == null) return;
+      final messages = response.payload!['messages'];
+      if (messages is! List) return;
+
+      // Walk backwards to find the most recent __A2UI__ tool result
+      for (int i = messages.length - 1; i >= 0; i--) {
+        final msg = messages[i];
+        if (msg is! Map<String, dynamic>) continue;
+        final role = msg['role'] as String?;
+        if (role != 'tool' && role != 'toolResult') continue;
+        final contentList = msg['content'];
+        if (contentList is! List) continue;
+        for (final block in contentList) {
+          if (block is! Map<String, dynamic>) continue;
+          final text = block['text'] as String?;
+          if (text != null && text.startsWith('__A2UI__') && text != _lastCanvasSurface) {
+            _lastCanvasSurface = text;
+            debugPrint('[Canvas] Found A2UI in history, rendering surface');
+            _handleA2UIToolResult(text);
+            setState(() {
+              if (_entries.isEmpty || _entries.last.role != 'tool' || !_entries.last.isStreaming) {
+                _entries.add(ChatEntry(
+                  role: 'tool',
+                  content: 'Surface rendered in Canvas',
+                  toolName: 'canvas_ui',
+                  isStreaming: false,
+                ));
+              } else {
+                _entries[_entries.length - 1] = _entries.last.copyWith(
+                  content: 'Surface rendered in Canvas',
+                  isStreaming: false,
+                );
+              }
+            });
+            _scrollToBottom();
+            return; // Found and rendered, done
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[Canvas] poll error: $e');
+    }
+  }
+
+  void _handleA2UIToolResult(String result) {
+    final lines = result.split('\n').skip(1);
+    final client = ref.read(gatewayClientProvider);
+    for (final line in lines) {
+      if (line.trim().isEmpty) continue;
+      try {
+        final parsed = jsonDecode(line.trim()) as Map<String, dynamic>;
+        client.emitCanvasEvent(WsEvent(event: 'a2ui', payload: parsed));
+      } catch (_) {}
+    }
   }
 
   void _scrollToBottom() {
@@ -356,6 +516,9 @@ class _AssistantBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final baseStyle = theme.textTheme.bodyLarge ?? const TextStyle();
+
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
@@ -374,9 +537,67 @@ class _AssistantBubble extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Flexible(
-              child: SelectableText(
-                entry.content,
-                style: Theme.of(context).textTheme.bodyLarge,
+              child: MarkdownBody(
+                data: entry.content,
+                selectable: true,
+                styleSheet: MarkdownStyleSheet(
+                  p: baseStyle,
+                  h1: baseStyle.copyWith(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF6EE7B7),
+                  ),
+                  h2: baseStyle.copyWith(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF6EE7B7),
+                  ),
+                  h3: baseStyle.copyWith(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  code: baseStyle.copyWith(
+                    fontSize: 13,
+                    color: const Color(0xFF6EE7B7),
+                    backgroundColor: const Color(0xFF1A1A1A),
+                  ),
+                  codeblockDecoration: BoxDecoration(
+                    color: const Color(0xFF0A0A0A),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF2A2A2A)),
+                  ),
+                  codeblockPadding: const EdgeInsets.all(12),
+                  blockquoteDecoration: BoxDecoration(
+                    border: Border(
+                      left: BorderSide(
+                        color: const Color(0xFF3B82F6),
+                        width: 3,
+                      ),
+                    ),
+                  ),
+                  blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
+                  listBullet: baseStyle.copyWith(color: const Color(0xFF6EE7B7)),
+                  strong: baseStyle.copyWith(fontWeight: FontWeight.bold),
+                  em: baseStyle.copyWith(fontStyle: FontStyle.italic),
+                  a: baseStyle.copyWith(
+                    color: const Color(0xFF3B82F6),
+                    decoration: TextDecoration.underline,
+                  ),
+                  tableHead: baseStyle.copyWith(fontWeight: FontWeight.bold),
+                  tableBorder: TableBorder.all(color: const Color(0xFF2A2A2A)),
+                  tableHeadAlign: TextAlign.left,
+                  tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  horizontalRuleDecoration: BoxDecoration(
+                    border: Border(
+                      top: BorderSide(color: const Color(0xFF2A2A2A)),
+                    ),
+                  ),
+                ),
+                onTapLink: (text, href, title) {
+                  if (href != null) {
+                    Clipboard.setData(ClipboardData(text: href));
+                  }
+                },
               ),
             ),
             if (entry.isStreaming)

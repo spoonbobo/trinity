@@ -43,7 +43,8 @@ class LobsterApproval {
 }
 
 class ApprovalPanel extends ConsumerStatefulWidget {
-  const ApprovalPanel({super.key});
+  final VoidCallback? onAllResolved;
+  const ApprovalPanel({super.key, this.onAllResolved});
 
   @override
   ConsumerState<ApprovalPanel> createState() => _ApprovalPanelState();
@@ -115,6 +116,7 @@ class _ApprovalPanelState extends ConsumerState<ApprovalPanel> {
     final client = ref.read(gatewayClientProvider);
     await client.resolveApproval(request.requestId, approve);
     setState(() => request.resolved = true);
+    _checkAllResolved();
   }
 
   Future<void> _resolveLobsterApproval(
@@ -127,6 +129,15 @@ class _ApprovalPanelState extends ConsumerState<ApprovalPanel> {
           : '/lobster resume ${approval.resumeToken} --reject',
     );
     setState(() => approval.resolved = true);
+    _checkAllResolved();
+  }
+
+  void _checkAllResolved() {
+    final hasPending = _execApprovals.any((a) => !a.resolved) ||
+        _lobsterApprovals.any((a) => !a.resolved);
+    if (!hasPending) {
+      widget.onAllResolved?.call();
+    }
   }
 
   @override

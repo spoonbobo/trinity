@@ -30,6 +30,14 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
   }
 
   void _handleEvent(WsEvent event) {
+    try {
+      _handleEventInner(event);
+    } catch (e, st) {
+      debugPrint('[A2UI] error handling event: $e\n$st');
+    }
+  }
+
+  void _handleEventInner(WsEvent event) {
     if (event.event == 'a2ui' || event.event == 'canvas') {
       _handleA2UIEvent(event);
       return;
@@ -39,11 +47,13 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
     final state = event.payload['state'] as String?;
     if (state != 'final') return;
 
-    final message = event.payload['message'] as Map<String, dynamic>?;
-    if (message == null) return;
-    final contentList = message['content'] as List<dynamic>?;
-    if (contentList == null || contentList.isEmpty) return;
-    final text = (contentList[0] as Map<String, dynamic>)['text'] as String? ?? '';
+    final message = event.payload['message'];
+    if (message is! Map<String, dynamic>) return;
+    final contentList = message['content'];
+    if (contentList is! List || contentList.isEmpty) return;
+    final first = contentList[0];
+    if (first is! Map<String, dynamic>) return;
+    final text = first['text'] as String? ?? '';
 
     final match = a2uiJsonlPattern.firstMatch(text);
     if (match == null) return;
@@ -62,25 +72,37 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
     final payload = event.payload;
 
     if (payload.containsKey('surfaceUpdate')) {
-      final update =
-          SurfaceUpdate.fromJson(payload['surfaceUpdate'] as Map<String, dynamic>);
-      setState(() {
-        final surface = _surfaces.putIfAbsent(
-          update.surfaceId,
-          () => A2UISurface(surfaceId: update.surfaceId, components: []),
-        );
-        surface.components
-          ..clear()
-          ..addAll(update.components);
-      });
+      final raw = payload['surfaceUpdate'];
+      if (raw is Map<String, dynamic>) {
+        try {
+          final update = SurfaceUpdate.fromJson(raw);
+          setState(() {
+            final surface = _surfaces.putIfAbsent(
+              update.surfaceId,
+              () => A2UISurface(surfaceId: update.surfaceId, components: []),
+            );
+            surface.components
+              ..clear()
+              ..addAll(update.components);
+          });
+        } catch (e) {
+          debugPrint('[A2UI] bad surfaceUpdate: $e');
+        }
+      }
     }
 
     if (payload.containsKey('beginRendering')) {
-      final begin =
-          BeginRendering.fromJson(payload['beginRendering'] as Map<String, dynamic>);
-      setState(() {
-        _surfaces[begin.surfaceId]?.rootId = begin.root;
-      });
+      final raw = payload['beginRendering'];
+      if (raw is Map<String, dynamic>) {
+        try {
+          final begin = BeginRendering.fromJson(raw);
+          setState(() {
+            _surfaces[begin.surfaceId]?.rootId = begin.root;
+          });
+        } catch (e) {
+          debugPrint('[A2UI] bad beginRendering: $e');
+        }
+      }
     }
 
     if (payload.containsKey('dataModelUpdate')) {
@@ -89,11 +111,17 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
     }
 
     if (payload.containsKey('deleteSurface')) {
-      final del =
-          DeleteSurface.fromJson(payload['deleteSurface'] as Map<String, dynamic>);
-      setState(() {
-        _surfaces.remove(del.surfaceId);
-      });
+      final raw = payload['deleteSurface'];
+      if (raw is Map<String, dynamic>) {
+        try {
+          final del = DeleteSurface.fromJson(raw);
+          setState(() {
+            _surfaces.remove(del.surfaceId);
+          });
+        } catch (e) {
+          debugPrint('[A2UI] bad deleteSurface: $e');
+        }
+      }
     }
   }
 
@@ -108,34 +136,7 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
     final theme = Theme.of(context);
 
     if (_surfaces.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.grid_view_rounded,
-              size: 36,
-              color: theme.colorScheme.primary.withOpacity(0.2),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'CANVAS',
-              style: theme.textTheme.labelSmall?.copyWith(
-                letterSpacing: 2,
-                color: const Color(0xFF3A3A3A),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Agent-driven UI surfaces appear here.',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: const Color(0xFF4A4A4A),
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-      );
+      return const SizedBox.shrink();
     }
 
     return ListView(
@@ -408,10 +409,20 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
 
   List<String> _resolveChildIds(dynamic childrenProp) {
     if (childrenProp == null) return [];
-    if (childrenProp is List) return childrenProp.cast<String>();
+    if (childrenProp is List) {
+      return childrenProp
+          .where((e) => e != null)
+          .map((e) => e.toString())
+          .toList();
+    }
     if (childrenProp is Map) {
       final explicit = childrenProp['explicitList'];
-      if (explicit is List) return explicit.cast<String>();
+      if (explicit is List) {
+        return explicit
+            .where((e) => e != null)
+            .map((e) => e.toString())
+            .toList();
+      }
     }
     return [];
   }

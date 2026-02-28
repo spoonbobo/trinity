@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/gateway_client.dart' as gw;
 import '../../core/auth.dart';
+import '../../models/ws_frame.dart';
 import '../prompt_bar/prompt_bar.dart';
 import '../chat/chat_stream.dart';
 import '../canvas/a2ui_renderer.dart';
@@ -33,15 +35,30 @@ class ShellPage extends ConsumerStatefulWidget {
 }
 
 class _ShellPageState extends ConsumerState<ShellPage> {
-  bool _showCanvas = false;
   bool _showGovernance = false;
+  StreamSubscription<WsEvent>? _approvalSub;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(gatewayClientProvider).connect();
+      final client = ref.read(gatewayClientProvider);
+      client.connect().catchError((e) {
+        debugPrint('[Shell] connect failed: $e');
+      });
+      // Auto-show governance panel when approval events arrive
+      _approvalSub = client.approvalEvents.listen((_) {
+        if (!_showGovernance && mounted) {
+          setState(() => _showGovernance = true);
+        }
+      });
     });
+  }
+
+  @override
+  void dispose() {
+    _approvalSub?.cancel();
+    super.dispose();
   }
 
   @override
@@ -58,23 +75,22 @@ class _ShellPageState extends ConsumerState<ShellPage> {
               children: [
                 // Main chat area
                 Expanded(
-                  flex: _showCanvas || _showGovernance ? 6 : 10,
+                  flex: 6,
                   child: const ChatStreamView(),
                 ),
-                // Canvas panel (slides in from right)
-                if (_showCanvas)
-                  Expanded(
-                    flex: 4,
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        border: Border(
-                          left: BorderSide(color: Color(0xFF2A2A2A)),
-                        ),
+                // Canvas panel (always visible)
+                Expanded(
+                  flex: 4,
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      border: Border(
+                        left: BorderSide(color: Color(0xFF2A2A2A)),
                       ),
-                      child: const A2UIRendererPanel(),
                     ),
+                    child: const A2UIRendererPanel(),
                   ),
-                // Governance panel (slides in from right)
+                ),
+                // Governance panel (auto-shows on approval events)
                 if (_showGovernance)
                   Expanded(
                     flex: 4,
@@ -84,25 +100,17 @@ class _ShellPageState extends ConsumerState<ShellPage> {
                           left: BorderSide(color: Color(0xFF2A2A2A)),
                         ),
                       ),
-                      child: const ApprovalPanel(),
+                      child: ApprovalPanel(
+                        onAllResolved: () {
+                          if (mounted) setState(() => _showGovernance = false);
+                        },
+                      ),
                     ),
                   ),
               ],
             ),
           ),
-          PromptBar(
-            enabled: isConnected,
-            onCanvasToggle: () => setState(() {
-              _showCanvas = !_showCanvas;
-              if (_showCanvas) _showGovernance = false;
-            }),
-            onGovernanceToggle: () => setState(() {
-              _showGovernance = !_showGovernance;
-              if (_showGovernance) _showCanvas = false;
-            }),
-            showCanvas: _showCanvas,
-            showGovernance: _showGovernance,
-          ),
+          PromptBar(enabled: isConnected),
         ],
       ),
     );

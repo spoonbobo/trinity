@@ -183,11 +183,32 @@ docker exec trinity-openclaw openclaw doctor --fix
 docker exec trinity-openclaw openclaw dashboard --no-open
 ```
 
-**Rebuild after code changes:**
-```
+**Rebuild frontend after Dart source changes:**
+
+CRITICAL: `run --rm frontend-builder` alone does NOT rebuild the image — it reuses the cached one. You MUST `build` first:
+
+```bash
+# 1. Rebuild image (--no-cache busts Docker layer cache — REQUIRED for source changes)
+docker compose -f web/docker-compose.yml --profile build build --no-cache frontend-builder
+
+# 2. Run builder to copy output to volume
 docker compose -f web/docker-compose.yml --profile build run --rm frontend-builder
-docker compose -f web/docker-compose.yml up -d
+
+# 3. Restart nginx to serve new build
+docker restart trinity-nginx
+
+# 4. Tell user to hard-refresh (Ctrl+Shift+R)
 ```
+
+**Deploy extension or AGENTS.md changes (no rebuild needed):**
+
+```bash
+docker cp web/extensions/canvas-bridge/index.ts trinity-openclaw:/home/node/.openclaw/extensions/canvas-bridge/index.ts
+docker cp web/AGENTS.md trinity-openclaw:/home/node/.openclaw/workspace/AGENTS.md
+docker restart trinity-openclaw
+```
+
+Note: AGENTS.md changes only take effect on new sessions. Clear the webchat session to force a fresh system prompt.
 
 **Update OpenClaw to latest:**
 ```

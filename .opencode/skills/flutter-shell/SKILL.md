@@ -137,14 +137,80 @@ Two approval types:
 
 ## Build & Deploy
 
-The Flutter app is built inside Docker via the `frontend-builder` profile:
+The Flutter app is built inside Docker via the `frontend-builder` profile. The Dockerfile COPYs source from `web/frontend/` into the image and runs `flutter build web`.
 
-```
+### CRITICAL: Docker build cache
+
+**`docker compose run --rm frontend-builder` does NOT rebuild the image** — it only runs the existing image's CMD (copies build output to the volume). If you changed any Dart source files, you MUST rebuild the image first:
+
+```bash
+# Step 1: Rebuild the image (REQUIRED after any source change)
+docker compose -f web/docker-compose.yml --profile build build --no-cache frontend-builder
+
+# Step 2: Run the builder to copy output to the volume
 docker compose -f web/docker-compose.yml --profile build run --rm frontend-builder
-docker compose -f web/docker-compose.yml up -d
+
+# Step 3: Restart nginx to serve the new build
+docker restart trinity-nginx
 ```
 
-The builder outputs to a `flutter-build` volume, which nginx serves as static files.
+Without `--no-cache` (or at minimum `build` before `run`), Docker reuses the cached image layer and your source changes are silently ignored. This is the #1 cause of "my changes aren't working" issues.
+
+### Deploying canvas-bridge extension changes
+
+The canvas-bridge extension (`web/extensions/canvas-bridge/index.ts`) lives in the `openclaw-data` Docker volume. To update it without nuking the volume (which would lose WhatsApp auth, sessions, credentials):
+
+```bash
+# Copy updated file directly into the running container
+docker cp web/extensions/canvas-bridge/index.ts trinity-openclaw:/home/node/.openclaw/extensions/canvas-bridge/index.ts
+
+# Restart gateway to reload the extension
+docker restart trinity-openclaw
+```
+
+### Deploying AGENTS.md changes
+
+The agent bootstrap files live in the workspace inside the `openclaw-data` volume:
+
+```bash
+docker cp web/AGENTS.md trinity-openclaw:/home/node/.openclaw/workspace/AGENTS.md
+docker restart trinity-openclaw
+```
+
+**Note:** Existing sessions cache the system prompt from when they were created. Changes to AGENTS.md only take effect on NEW sessions. To force a fresh session, delete the session file and entry from `sessions.json` inside the container.
+
+### Full deploy checklist (after frontend + extension + AGENTS.md changes)
+
+```bash
+# 1. Rebuild frontend image (--no-cache to bust Docker cache)
+docker compose -f web/docker-compose.yml --profile build build --no-cache frontend-builder
+
+# 2. Copy build output to volume
+docker compose -f web/docker-compose.yml --profile build run --rm frontend-builder
+
+# 3. Copy extension + AGENTS.md into container
+docker cp web/extensions/canvas-bridge/index.ts trinity-openclaw:/home/node/.openclaw/extensions/canvas-bridge/index.ts
+docker cp web/AGENTS.md trinity-openclaw:/home/node/.openclaw/workspace/AGENTS.md
+
+# 4. Restart services
+docker restart trinity-nginx
+docker restart trinity-openclaw
+
+# 5. Wait for healthy
+timeout 30 bash -c 'while ! docker inspect --format={{.State.Health.Status}} trinity-openclaw | grep -q healthy; do sleep 3; done'
+
+# 6. Tell user to hard-refresh browser (Ctrl+Shift+R)
+```
+
+### Verifying the build includes your changes
+
+Search for known strings in the built JS (Dart tree-shakes identifiers, so search for string literals from your code like debugPrint messages):
+
+```bash
+docker run --rm -v web_flutter-build:/build alpine grep -c 'YOUR_UNIQUE_STRING' /build/main.dart.js
+```
+
+### Gateway token
 
 The gateway token must be passed at build time:
 ```

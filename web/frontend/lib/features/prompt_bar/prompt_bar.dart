@@ -5,18 +5,10 @@ import 'voice_input.dart';
 
 class PromptBar extends ConsumerStatefulWidget {
   final bool enabled;
-  final VoidCallback onCanvasToggle;
-  final VoidCallback onGovernanceToggle;
-  final bool showCanvas;
-  final bool showGovernance;
 
   const PromptBar({
     super.key,
     required this.enabled,
-    required this.onCanvasToggle,
-    required this.onGovernanceToggle,
-    required this.showCanvas,
-    required this.showGovernance,
   });
 
   @override
@@ -104,21 +96,6 @@ class _PromptBarState extends ConsumerState<PromptBar> {
               ),
             Row(
               children: [
-                // Panel toggles
-                _PanelToggle(
-                  icon: Icons.grid_view_rounded,
-                  active: widget.showCanvas,
-                  onTap: widget.onCanvasToggle,
-                  tooltip: 'Canvas',
-                ),
-                const SizedBox(width: 4),
-                _PanelToggle(
-                  icon: Icons.shield_outlined,
-                  active: widget.showGovernance,
-                  onTap: widget.onGovernanceToggle,
-                  tooltip: 'Governance',
-                ),
-                const SizedBox(width: 8),
                 // Text input
                 Expanded(
                   child: TextField(
@@ -161,47 +138,6 @@ class _PromptBarState extends ConsumerState<PromptBar> {
               ],
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PanelToggle extends StatelessWidget {
-  final IconData icon;
-  final bool active;
-  final VoidCallback onTap;
-  final String tooltip;
-
-  const _PanelToggle({
-    required this.icon,
-    required this.active,
-    required this.onTap,
-    required this.tooltip,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: active ? const Color(0xFF1A2A1A) : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: active ? const Color(0xFF6EE7B7) : const Color(0xFF2A2A2A),
-            ),
-          ),
-          child: Icon(
-            icon,
-            size: 18,
-            color: active ? const Color(0xFF6EE7B7) : const Color(0xFF6B6B6B),
-          ),
         ),
       ),
     );

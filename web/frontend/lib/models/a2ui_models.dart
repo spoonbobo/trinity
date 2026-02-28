@@ -24,10 +24,14 @@ class A2UIComponent {
   });
 
   factory A2UIComponent.fromJson(Map<String, dynamic> json) {
-    final id = json['id'] as String;
-    final componentMap = json['component'] as Map<String, dynamic>;
-    final type = componentMap.keys.first;
-    final props = componentMap[type] as Map<String, dynamic>;
+    final id = json['id'] as String? ?? '';
+    final componentRaw = json['component'];
+    if (componentRaw is! Map<String, dynamic> || componentRaw.isEmpty) {
+      return A2UIComponent(id: id, type: 'Unknown', props: {});
+    }
+    final type = componentRaw.keys.first;
+    final propsRaw = componentRaw[type];
+    final props = propsRaw is Map<String, dynamic> ? propsRaw : <String, dynamic>{};
     return A2UIComponent(id: id, type: type, props: props);
   }
 }

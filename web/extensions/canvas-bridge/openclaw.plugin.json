@@ -1,0 +1,11 @@
+{
+  "id": "canvas-bridge",
+  "name": "Canvas Bridge",
+  "description": "Bridges A2UI canvas rendering to webchat clients without requiring a paired node.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

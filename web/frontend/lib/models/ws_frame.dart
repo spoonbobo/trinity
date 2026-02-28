@@ -37,10 +37,14 @@ class WsResponse {
   });
 
   factory WsResponse.fromJson(Map<String, dynamic> json) => WsResponse(
-        id: json['id'] as String,
-        ok: json['ok'] as bool,
-        payload: json['payload'] as Map<String, dynamic>?,
-        error: json['error'] as Map<String, dynamic>?,
+        id: json['id'] as String? ?? '',
+        ok: json['ok'] as bool? ?? false,
+        payload: json['payload'] is Map<String, dynamic>
+            ? json['payload'] as Map<String, dynamic>
+            : null,
+        error: json['error'] is Map<String, dynamic>
+            ? json['error'] as Map<String, dynamic>
+            : null,
       );
 }
 
@@ -58,10 +62,14 @@ class WsEvent {
   });
 
   factory WsEvent.fromJson(Map<String, dynamic> json) => WsEvent(
-        event: json['event'] as String,
-        payload: (json['payload'] as Map<String, dynamic>?) ?? {},
-        seq: json['seq'] as int?,
-        stateVersion: json['stateVersion'] as int?,
+        event: json['event'] as String? ?? '',
+        payload: json['payload'] is Map<String, dynamic>
+            ? json['payload'] as Map<String, dynamic>
+            : {},
+        seq: json['seq'] is int ? json['seq'] as int : null,
+        stateVersion: json['stateVersion'] is int
+            ? json['stateVersion'] as int
+            : null,
       );
 }
 
@@ -79,16 +87,20 @@ class WsFrame {
   });
 
   factory WsFrame.parse(String raw) {
-    final json = jsonDecode(raw) as Map<String, dynamic>;
-    final typeStr = json['type'] as String;
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map<String, dynamic>) {
+      throw FormatException('Frame is not a JSON object: ${raw.length > 100 ? raw.substring(0, 100) : raw}');
+    }
+    final json = decoded;
+    final typeStr = json['type'] as String? ?? '';
 
     switch (typeStr) {
       case 'req':
         return WsFrame._(
           type: FrameType.req,
           request: WsRequest(
-            id: json['id'] as String,
-            method: json['method'] as String,
+            id: json['id'] as String? ?? '',
+            method: json['method'] as String? ?? '',
             params: (json['params'] as Map<String, dynamic>?) ?? {},
           ),
         );
