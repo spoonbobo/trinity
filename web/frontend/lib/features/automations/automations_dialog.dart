@@ -216,8 +216,9 @@ class _AutomationsDialogState extends ConsumerState<AutomationsDialog> {
 
     setState(() => _togglingCronId = id);
     try {
+      final action = enabled ? 'disable' : 'enable';
       await client.executeCommandForOutput(
-        'cron edit $id --${enabled ? 'disable' : 'enable'}',
+        'cron $action $id',
         timeout: const Duration(seconds: 15),
       );
       await _loadData();
@@ -353,7 +354,20 @@ class _AutomationsDialogState extends ConsumerState<AutomationsDialog> {
       final deleteFlag = _cronDeleteAfterRun ? '--delete-after-run' : '';
       final announceFlag = _cronSession == 'isolated' ? '--announce' : '';
 
-      final cmd = 'cron add --name "$name" $scheduleFlag $sessionFlag $payloadFlag $announceFlag $deleteFlag'.replaceAll(RegExp(r'\s+'), ' ').trim();
+      // Sanitize user inputs to prevent shell metacharacter injection
+      String shellEscape(String s) => s.replaceAll(r'\', r'\\').replaceAll('"', r'\"').replaceAll(r'$', r'\$').replaceAll('`', r'\`');
+      final safeName = shellEscape(name);
+      final safeSchedule = shellEscape(schedule);
+      final safeMessage = shellEscape(message);
+      final scheduleFlag = isOneShot ? '--at "$safeSchedule"' : '--cron "$safeSchedule"';
+      final sessionFlag = '--session $_cronSession';
+      final payloadFlag = _cronSession == 'main'
+          ? '--system-event "$safeMessage"'
+          : '--message "$safeMessage"';
+      final deleteFlag = _cronDeleteAfterRun ? '--delete-after-run' : '';
+      final announceFlag = _cronSession == 'isolated' ? '--announce' : '';
+
+      final cmd = 'cron add --name "$safeName" $scheduleFlag $sessionFlag $payloadFlag $announceFlag $deleteFlag'.replaceAll(RegExp(r'\s+'), ' ').trim();
 
       await client.executeCommandForOutput(cmd, timeout: const Duration(seconds: 30));
 

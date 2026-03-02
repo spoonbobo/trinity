@@ -111,7 +111,7 @@ class MimeValidator {
       final ext = name.substring(dotIndex);
       if (_allowedExtensions.contains(ext)) {
         if (file.size > AttachmentLimits.maxDefaultBytes) {
-          return '${file.name} exceeds 25 MB limit';
+          return '${file.name} exceeds ${(AttachmentLimits.maxDefaultBytes / 1024 / 1024).round()} MB limit';
         }
         return null; // Valid
       }
@@ -228,6 +228,7 @@ Future<FileUploadResult> uploadFileToWorkspace({
   final completer = Completer<FileUploadResult>();
 
   request.onLoadEnd.first.then((_) {
+    if (completer.isCompleted) return;
     if (request.status! >= 200 && request.status! < 300) {
       try {
         final body = jsonDecode(request.responseText ?? '{}') as Map<String, dynamic>;
@@ -251,6 +252,21 @@ Future<FileUploadResult> uploadFileToWorkspace({
         if (body['error'] != null) errorMsg = body['error'] as String;
       } catch (_) {}
       completer.complete(FileUploadResult(ok: false, error: errorMsg));
+    }
+  });
+
+  // Handle network-level errors (CORS, unreachable, etc.)
+  request.onError.first.then((_) {
+    if (!completer.isCompleted) {
+      completer.complete(FileUploadResult(ok: false, error: 'Network error during upload'));
+    }
+  });
+
+  // Timeout after 30 seconds
+  Future.delayed(const Duration(seconds: 30), () {
+    if (!completer.isCompleted) {
+      request.abort();
+      completer.complete(FileUploadResult(ok: false, error: 'Upload timed out'));
     }
   });
 

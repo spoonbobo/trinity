@@ -1,4 +1,5 @@
 -- Seed: Permissions and role-permission bindings
+-- Idempotent: uses ON CONFLICT DO NOTHING
 
 -- Insert all permission actions
 INSERT INTO rbac.permissions (action, description) VALUES
@@ -34,7 +35,8 @@ INSERT INTO rbac.permissions (action, description) VALUES
   ('users.list',                'List users and roles'),
   ('users.manage',              'Assign/revoke user roles'),
   -- Audit
-  ('audit.read',                'View audit log');
+  ('audit.read',                'View audit log')
+ON CONFLICT (action) DO NOTHING;
 
 -- Guest permissions (read-only)
 INSERT INTO rbac.role_permissions (role_id, permission_id)
@@ -49,7 +51,8 @@ INSERT INTO rbac.role_permissions (role_id, permission_id)
     'settings.read',
     'governance.view',
     'terminal.exec.safe'
-  );
+  )
+ON CONFLICT DO NOTHING;
 
 -- User permissions (standard operational)
 INSERT INTO rbac.role_permissions (role_id, permission_id)
@@ -63,7 +66,8 @@ INSERT INTO rbac.role_permissions (role_id, permission_id)
     'terminal.exec.standard',
     'governance.resolve',
     'acp.spawn'
-  );
+  )
+ON CONFLICT DO NOTHING;
 
 -- Admin permissions (configuration + management)
 INSERT INTO rbac.role_permissions (role_id, permission_id)
@@ -77,4 +81,5 @@ INSERT INTO rbac.role_permissions (role_id, permission_id)
     'users.list',
     'users.manage',
     'audit.read'
-  );
+  )
+ON CONFLICT DO NOTHING;

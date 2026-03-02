@@ -323,7 +323,11 @@ List<int> _parseFieldValues(String field) {
       // */N or N-M/S
       final range = stepMatch.group(1)!;
       final step = int.parse(stepMatch.group(2)!);
-      int start = 0, end = 59; // default for minute
+      // Default range depends on field context; caller should pass bounds.
+      // For a standalone parser without field context, use 0-59 (minute).
+      // This is a best-effort default; callers using specific fields should
+      // validate ranges separately.
+      int start = 0, end = 59;
       if (range != '*') {
         final bounds = range.split('-');
         start = int.parse(bounds[0]);

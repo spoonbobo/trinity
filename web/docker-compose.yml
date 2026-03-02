@@ -4,8 +4,8 @@ services:
     image: supabase/postgres:15.8.1.127
     container_name: trinity-supabase-db
     restart: unless-stopped
-    ports:
-      - "5432:5432"
+    # Port NOT exposed to host -- only accessible within Docker network
+    # Use `docker exec -it trinity-supabase-db psql -U postgres` for direct access
     volumes:
       - supabase-db-data:/var/lib/postgresql/data
       - ./supabase/migrations:/docker-entrypoint-initdb.d/rbac:ro
@@ -17,6 +17,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     networks:
       - trinity
 
@@ -25,14 +29,22 @@ services:
     image: hashicorp/vault:1.15
     container_name: trinity-vault
     restart: unless-stopped
-    ports:
-      - "8200:8200"
+    # Port NOT exposed to host -- only accessible within Docker network
     environment:
       VAULT_ADDR: http://0.0.0.0:8200
       VAULT_DEV_ROOT_TOKEN_ID: root
       VAULT_UI: "false"
     cap_add:
       - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     networks:
       - trinity
 
@@ -43,7 +55,7 @@ services:
     restart: "no"
     depends_on:
       vault:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - vault-data:/vault/data
       - ./vault/scripts:/vault/scripts:ro
@@ -59,17 +71,20 @@ services:
       SUPERADMIN_ALLOWLIST: ${SUPERADMIN_ALLOWLIST:-}
       ENABLE_DEFAULT_SUPERADMIN: ${ENABLE_DEFAULT_SUPERADMIN:-true}
     entrypoint: ["/bin/sh", "/vault/scripts/init.sh"]
+    deploy:
+      resources:
+        limits:
+          memory: 128M
     networks:
       - trinity
 
   # ─── Grafana Loki ────────────────────────────────────────────────────────
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:3.4.2
     container_name: trinity-loki
     restart: unless-stopped
     command: -config.file=/etc/loki/local-config.yaml -validation.allow-structured-metadata=false
-    ports:
-      - "3100:3100"
+    # Port NOT exposed to host
     volumes:
       - ./loki/config.yml:/etc/loki/local-config.yaml:ro
       - loki-data:/loki
@@ -87,11 +102,10 @@ services:
 
   # ─── Grafana ───────────────────────────────────────────────────────────────
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.5.2
     container_name: trinity-grafana
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    # Port NOT exposed to host -- access via nginx reverse proxy or `docker exec`
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in .env}
@@ -118,9 +132,11 @@ services:
     image: fluent/fluentd:v1.16-1
     container_name: trinity-fluentd
     restart: unless-stopped
-    ports:
-      - "24224:24224"
-      - "24224:24224/udp"
+    # Port NOT exposed to host -- only internal services send logs
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     volumes:
       - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf:ro
     networks:
@@ -155,6 +171,15 @@ services:
       GOTRUE_EXTERNAL_KEYCLOAK_SECRET: ${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
       GOTRUE_EXTERNAL_KEYCLOAK_URL: http://keycloak:8080/realms/trinity
       GOTRUE_EXTERNAL_KEYCLOAK_REDIRECT_URI: ${API_EXTERNAL_URL:-http://localhost}/supabase/auth/v1/callback
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9999/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     networks:
       - trinity
 
@@ -183,6 +208,16 @@ services:
       KC_HTTP_RELATIVE_PATH: /keycloak
     volumes:
       - ./keycloak/realm-export.json:/opt/keycloak/data/import/trinity-realm.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /keycloak/health/ready HTTP/1.1\r\nHost: localhost\r\n\r\n' >&3 && cat <&3 | grep -q '200'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     depends_on:
       supabase-db:
         condition: service_healthy
@@ -195,7 +230,7 @@ services:
     restart: "no"
     depends_on:
       keycloak:
-        condition: service_started
+        condition: service_healthy
     environment:
       KEYCLOAK_SERVER_URL: http://keycloak:8080/keycloak
       KEYCLOAK_REALM: trinity
@@ -212,6 +247,10 @@ services:
     volumes:
       - ./keycloak/configure-authentik-idp.sh:/opt/keycloak/bin/configure-authentik-idp.sh:ro
     entrypoint: ["/bin/sh", "/opt/keycloak/bin/configure-authentik-idp.sh"]
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     networks:
       - trinity
 
@@ -237,6 +276,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${SUPABASE_POSTGRES_PASSWORD:?Set SUPABASE_POSTGRES_PASSWORD in .env}
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+      SUPERADMIN_ALLOWLIST: ${SUPERADMIN_ALLOWLIST:-}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:18791/auth/health || exit 1"]
       interval: 15s
@@ -261,8 +301,7 @@ services:
     container_name: trinity-openclaw
     restart: unless-stopped
     command: ["openclaw", "gateway", "--port", "18789", "--bind", "lan", "--allow-unconfigured"]
-    ports:
-      - "18789:18789"
+    # Port NOT exposed to host -- access via nginx reverse proxy
     volumes:
       - openclaw-data:/home/node/.openclaw
     env_file:
@@ -305,7 +344,7 @@ services:
         limits:
           memory: 256M
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       openclaw-gateway:
         condition: service_healthy
@@ -330,7 +369,7 @@ services:
 
   # ─── nginx ─────────────────────────────────────────────────────────────
   nginx:
-    image: nginx:alpine
+    image: nginx:1.27-alpine
     container_name: trinity-nginx
     restart: unless-stopped
     ports:
@@ -338,15 +377,24 @@ services:
     volumes:
       - flutter-build:/usr/share/nginx/html:ro
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/auth/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 128M
     depends_on:
       openclaw-gateway:
         condition: service_healthy
       terminal-proxy:
         condition: service_started
       auth-service:
-        condition: service_started
+        condition: service_healthy
       supabase-auth:
-        condition: service_started
+        condition: service_healthy
       keycloak-idp-bootstrap:
         condition: service_completed_successfully
     networks:

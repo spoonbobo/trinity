@@ -1,17 +1,17 @@
-# Vault Dev Server Configuration
-# DO NOT use this in production - dev mode only
+# Vault Server Configuration
+# For production, replace dev mode with proper unsealing and TLS
 
 storage "file" {
   path = "/vault/data"
 }
 
 listener "tcp" {
-  address     = "0.0.0.0:8201"
+  address     = "0.0.0.0:8200"
   tls_disable = "true"
 }
 
 ui = false
 
-# Default lease duration
-default_lease_ttl = "768h"
-max_lease_ttl = "768h"
+# Lease durations (production: use shorter TTLs with renewal)
+default_lease_ttl = "72h"
+max_lease_ttl     = "168h"

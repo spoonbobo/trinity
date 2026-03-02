@@ -8,8 +8,11 @@ ensure_config() {
   local key="$1"
   local value="$2"
   if ! openclaw config get "$key" >/dev/null 2>&1; then
-    openclaw config set "$key" "$value" >/dev/null 2>&1 || true
-    echo "[bootstrap] Set default config: $key"
+    if ! openclaw config set "$key" "$value" >/dev/null 2>&1; then
+      echo "[bootstrap] WARN: Failed to set config: $key" >&2
+    else
+      echo "[bootstrap] Set default config: $key"
+    fi
   fi
 }
 
@@ -21,7 +24,11 @@ seed_dir_if_empty() {
     return
   fi
 
-  mkdir -p "$dst"
+  if ! mkdir -p "$dst"; then
+    echo "[bootstrap] ERROR: Failed to create directory: $dst" >&2
+    return 1
+  fi
+
   if [ -z "$(ls -A "$dst" 2>/dev/null)" ]; then
     cp -a "$src"/. "$dst"/
     echo "[bootstrap] Seeded $dst from $src"
@@ -33,7 +40,11 @@ seed_dir_if_empty() {
 seed_dir_if_empty "$SEED_ROOT/skills" "$OPENCLAW_HOME/skills"
 seed_dir_if_empty "$SEED_ROOT/cron-templates" "$OPENCLAW_HOME/cron-templates"
 
-mkdir -p "$OPENCLAW_HOME/workspace" "$OPENCLAW_HOME/workspace/memory"
+if ! mkdir -p "$OPENCLAW_HOME/workspace" "$OPENCLAW_HOME/workspace/memory"; then
+  echo "[bootstrap] ERROR: Failed to create workspace directories" >&2
+  exit 1
+fi
+
 if [ ! -f "$OPENCLAW_HOME/workspace/MEMORY.md" ] && [ -f "$SEED_ROOT/workspace/MEMORY.md" ]; then
   cp -a "$SEED_ROOT/workspace/MEMORY.md" "$OPENCLAW_HOME/workspace/MEMORY.md"
   echo "[bootstrap] Seeded $OPENCLAW_HOME/workspace/MEMORY.md"

@@ -675,13 +675,9 @@ class _SkillsDialogState extends ConsumerState<SkillsDialog> {
   List<Map<String, dynamic>> _skillsForCategory() {
     switch (_skillsCategory) {
       case SkillsCategory.ready:
-        return _skills.where((s) => s['eligible'] == true && !_isTemplate(s)).toList();
+        return _skills.where((s) => s['eligible'] == true).toList();
       case SkillsCategory.clawhub:
-        return _skills.where((s) {
-          final name = (s['name'] ?? '').toString().toLowerCase();
-          final source = (s['source'] ?? '').toString().toLowerCase();
-          return name.contains('clawhub') || source.contains('clawhub');
-        }).toList();
+        return _skills.where((s) => !_isTemplate(s)).toList();
       case SkillsCategory.templates:
         return _skills.where(_isTemplate).toList();
     }

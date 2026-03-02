@@ -153,6 +153,8 @@ class _PromptBarState extends ConsumerState<PromptBar> {
     if (!widget.enabled || _sending) return;
 
     setState(() => _sending = true);
+    // Preserve text so user can retry on failure
+    final savedText = _controller.text;
     _controller.clear();
 
     try {
@@ -227,6 +229,15 @@ class _PromptBarState extends ConsumerState<PromptBar> {
       } else {
         await client.sendChatMessage(text, sessionKey: sessionKey);
       }
+    } catch (e) {
+      // Restore text on failure so user can retry
+      if (mounted && _controller.text.isEmpty) {
+        _controller.text = savedText;
+        _controller.selection = TextSelection.fromPosition(
+          TextPosition(offset: savedText.length),
+        );
+      }
+      rethrow;
     } finally {
       if (mounted) {
         setState(() => _sending = false);

@@ -26,9 +26,17 @@ router.get('/permissions', (req, res) => {
 });
 
 // POST /auth/session - exchange auth JWT for scoped gateway session token
+// Security: Only return the gateway token to users with terminal.exec.standard or higher
 router.post('/session', async (req, res) => {
   try {
-    const sessionToken = OPENCLAW_GATEWAY_TOKEN;
+    // Require at least 'user' role - do NOT hand out the gateway token to guests
+    const allowedRoles = ['user', 'admin', 'superadmin'];
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Guest users cannot obtain gateway session tokens',
+      });
+    }
 
     await writeAuditLog(
       req.user.id,
@@ -36,10 +44,12 @@ router.post('/session', async (req, res) => {
       'gateway',
       { role: req.user.role },
       req.ip
-    );
+    ).catch((err) => {
+      console.error('[auth] Audit log write failed:', err.message);
+    });
 
     res.json({
-      gatewayToken: sessionToken,
+      gatewayToken: OPENCLAW_GATEWAY_TOKEN,
       role: req.user.role,
       permissions: req.user.permissions,
       expiresIn: 86400,

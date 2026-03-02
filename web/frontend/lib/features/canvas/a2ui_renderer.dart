@@ -12,6 +12,7 @@ import '../../core/theme.dart';
 import '../../models/a2ui_models.dart';
 import '../../models/ws_frame.dart';
 import '../../core/providers.dart';
+import '../../main.dart' show fontFamilyProvider;
 import 'a2ui_editor.dart';
 
 /// Material icon name -> IconData lookup for the Icon component.
@@ -143,6 +144,8 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
   StreamSubscription<WsEvent>? _chatSub;
   final GlobalKey _repaintBoundaryKey = GlobalKey();
   bool _showExportMenu = false;
+  final LayerLink _exportLayerLink = LayerLink();
+  OverlayEntry? _exportOverlay;
 
   // Edit mode state
   bool _editMode = false;
@@ -151,6 +154,10 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
   final UndoRedoManager _undoRedo = UndoRedoManager();
   final FocusNode _canvasFocusNode = FocusNode();
   Timer? _syncDebounce;
+
+  /// Resolved code font family for CodeEditor components.
+  /// Set at the top of build() from fontFamilyProvider.
+  String _codeFontFamily = 'monospace';
 
   @override
   void initState() {
@@ -289,7 +296,7 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
     } catch (e) {
       debugPrint('[Canvas] export PNG error: $e');
     }
-    setState(() => _showExportMenu = false);
+    _hideExportMenu();
   }
 
   // Canvas export: download as JSON
@@ -318,7 +325,7 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
     } catch (e) {
       debugPrint('[Canvas] export JSON error: $e');
     }
-    setState(() => _showExportMenu = false);
+    _hideExportMenu();
   }
 
   // Canvas export: copy as image to clipboard (browser Clipboard API)
@@ -384,6 +391,7 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
     _chatSub?.cancel();
     _canvasFocusNode.dispose();
     _syncDebounce?.cancel();
+    _hideExportMenu();
     super.dispose();
   }
 
@@ -429,7 +437,6 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
   void _performEdit(VoidCallback edit) {
     _undoRedo.pushSnapshot(_surfaces);
     edit();
-    _syncEditToAgent();
     setState(() {});
   }
 
@@ -526,16 +533,14 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
   }
 
   /// Sync the current surface state to the agent as a chat message.
-  /// Debounced to avoid flooding the agent during rapid edits.
+  /// Called explicitly by the user via the sync toolbar button.
   void _syncEditToAgent() {
     _syncDebounce?.cancel();
-    _syncDebounce = Timer(const Duration(milliseconds: 800), () {
-      if (!mounted || _surfaces.isEmpty) return;
-      final jsonl = surfacesToJsonl(_surfaces);
-      if (jsonl.isEmpty) return;
-      final client = ref.read(gatewayClientProvider);
-      client.sendChatMessage('/a2ui-edit $jsonl');
-    });
+    if (!mounted || _surfaces.isEmpty) return;
+    final jsonl = surfacesToJsonl(_surfaces);
+    if (jsonl.isEmpty) return;
+    final client = ref.read(gatewayClientProvider);
+    client.sendChatMessage('/a2ui-edit $jsonl');
   }
 
   /// Canvas-scoped keyboard handler. Only intercepts Ctrl+Z/Y when the canvas
@@ -589,6 +594,12 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final t = ShellTokens.of(context);
+
+    // Resolve code font: use the app mono font if selected, else generic 'monospace'
+    final appFont = ref.watch(fontFamilyProvider);
+    _codeFontFamily = appFontFamilyIsMono(appFont)
+        ? fontFamilyName(appFont)
+        : 'monospace';
 
     // #6: Better empty state with label
     if (_surfaces.isEmpty) {
@@ -662,7 +673,6 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
             theme: theme,
             onEdited: () {
               _undoRedo.pushSnapshot(_surfaces);
-              _syncEditToAgent();
               setState(() {});
             },
             onDelete: _deleteSelected,
@@ -711,6 +721,13 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
                     onTap: _undoRedo.canRedo ? _handleRedo : null,
                     tokens: t,
                     tooltip: 'redo',
+                  ),
+                  const SizedBox(width: 4),
+                  _toolbarButton(
+                    icon: Icons.cloud_upload_outlined,
+                    onTap: _syncEditToAgent,
+                    tokens: t,
+                    tooltip: 'sync to agent',
                   ),
                 ],
                 const Spacer(),
@@ -801,58 +818,83 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
     );
   }
 
-  Widget _buildExportToolbar(ShellTokens t, ThemeData theme) {
-    return TapRegion(
-      onTapOutside: (_) {
-        if (_showExportMenu) setState(() => _showExportMenu = false);
-      },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          GestureDetector(
-            onTap: () => setState(() => _showExportMenu = !_showExportMenu),
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  borderRadius: kShellBorderRadiusSm,
-                  color: t.surfaceBase.withOpacity(0.8),
-                  border: Border.all(color: t.border, width: 0.5),
-                ),
-                child: Icon(Icons.download, size: 12, color: t.fgMuted),
-              ),
-            ),
-          ),
-          if (_showExportMenu) ...[
-            const SizedBox(height: 2),
-            Container(
+  void _toggleExportMenu() {
+    if (_showExportMenu) {
+      _hideExportMenu();
+    } else {
+      _showExportOverlay();
+    }
+  }
+
+  void _showExportOverlay() {
+    final t = ShellTokens.of(context);
+    final theme = Theme.of(context);
+    _exportOverlay = OverlayEntry(builder: (_) {
+      return TapRegion(
+        onTapOutside: (_) => _hideExportMenu(),
+        child: CompositedTransformFollower(
+          link: _exportLayerLink,
+          targetAnchor: Alignment.bottomRight,
+          followerAnchor: Alignment.topRight,
+          offset: const Offset(0, 2),
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
               decoration: BoxDecoration(
                 borderRadius: kShellBorderRadiusSm,
                 color: t.surfaceBase,
                 border: Border.all(color: t.border, width: 0.5),
               ),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _ExportMenuItem(
                     label: 'download PNG',
                     icon: Icons.image,
-                    onTap: _exportAsPng,
+                    onTap: () { _hideExportMenu(); _exportAsPng(); },
                     tokens: t, theme: theme,
                   ),
                   _ExportMenuItem(
                     label: 'download JSON',
                     icon: Icons.code,
-                    onTap: _exportAsJson,
+                    onTap: () { _hideExportMenu(); _exportAsJson(); },
                     tokens: t, theme: theme,
                   ),
                 ],
               ),
             ),
-          ],
-        ],
+          ),
+        ),
+      );
+    });
+    Overlay.of(context).insert(_exportOverlay!);
+    setState(() => _showExportMenu = true);
+  }
+
+  void _hideExportMenu() {
+    _exportOverlay?.remove();
+    _exportOverlay = null;
+    if (_showExportMenu && mounted) setState(() => _showExportMenu = false);
+  }
+
+  Widget _buildExportToolbar(ShellTokens t, ThemeData theme) {
+    return CompositedTransformTarget(
+      link: _exportLayerLink,
+      child: GestureDetector(
+        onTap: _toggleExportMenu,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              borderRadius: kShellBorderRadiusSm,
+              color: t.surfaceBase.withOpacity(0.8),
+              border: Border.all(color: t.border, width: 0.5),
+            ),
+            child: Icon(Icons.download, size: 12, color: t.fgMuted),
+          ),
+        ),
       ),
     );
   }
@@ -950,6 +992,7 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
           surface: surface,
           theme: theme,
           tokens: t,
+          codeFontFamily: _codeFontFamily,
         );
         break;
       default:
@@ -1736,6 +1779,7 @@ class _A2UICodeEditor extends StatefulWidget {
   final A2UISurface surface;
   final ThemeData theme;
   final ShellTokens tokens;
+  final String codeFontFamily;
 
   const _A2UICodeEditor({
     super.key,
@@ -1743,6 +1787,7 @@ class _A2UICodeEditor extends StatefulWidget {
     required this.surface,
     required this.theme,
     required this.tokens,
+    this.codeFontFamily = 'monospace',
   });
 
   @override
@@ -1878,7 +1923,7 @@ class _A2UICodeEditorState extends State<_A2UICodeEditor> {
                               fontSize: 12,
                               color: t.fgDisabled,
                               height: 1.5,
-                              fontFamily: 'monospace',
+                              fontFamily: widget.codeFontFamily,
                             ),
                           );
                         }),
@@ -1893,7 +1938,7 @@ class _A2UICodeEditorState extends State<_A2UICodeEditor> {
                               fontSize: 12,
                               color: t.accentPrimary,
                               height: 1.5,
-                              fontFamily: 'monospace',
+                              fontFamily: widget.codeFontFamily,
                             ),
                             decoration: const InputDecoration(
                               border: InputBorder.none,
@@ -1913,7 +1958,7 @@ class _A2UICodeEditorState extends State<_A2UICodeEditor> {
                               fontSize: 12,
                               color: t.accentPrimary,
                               height: 1.5,
-                              fontFamily: 'monospace',
+                              fontFamily: widget.codeFontFamily,
                             ),
                           ),
                   ),

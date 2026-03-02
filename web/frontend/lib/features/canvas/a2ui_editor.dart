@@ -298,62 +298,95 @@ class ComponentPalette extends StatefulWidget {
 }
 
 class _ComponentPaletteState extends State<ComponentPalette> {
+  final _layerLink = LayerLink();
+  OverlayEntry? _overlayEntry;
   bool _expanded = false;
+
+  @override
+  void dispose() {
+    _hideDropdown();
+    super.dispose();
+  }
+
+  void _toggleDropdown() {
+    if (_expanded) {
+      _hideDropdown();
+    } else {
+      _showDropdown();
+    }
+  }
+
+  void _showDropdown() {
+    _overlayEntry = OverlayEntry(builder: (_) => _buildDropdown());
+    Overlay.of(context).insert(_overlayEntry!);
+    setState(() => _expanded = true);
+  }
+
+  void _hideDropdown() {
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+    if (_expanded && mounted) setState(() => _expanded = false);
+  }
+
+  Widget _buildDropdown() {
+    final t = widget.tokens;
+    return TapRegion(
+      onTapOutside: (_) => _hideDropdown(),
+      child: CompositedTransformFollower(
+        link: _layerLink,
+        targetAnchor: Alignment.bottomLeft,
+        followerAnchor: Alignment.topLeft,
+        offset: const Offset(0, 2),
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            width: 160,
+            constraints: const BoxConstraints(maxHeight: 320),
+            decoration: BoxDecoration(
+              borderRadius: kShellBorderRadiusSm,
+              color: t.surfaceBase,
+              border: Border.all(color: t.border, width: 0.5),
+            ),
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              children: _buildGroupedList(t),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = widget.tokens;
-    return TapRegion(
-      onTapOutside: (_) {
-        if (_expanded) setState(() => _expanded = false);
-      },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          GestureDetector(
-            onTap: () => setState(() => _expanded = !_expanded),
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                decoration: BoxDecoration(
-                  borderRadius: kShellBorderRadiusSm,
-                  color: t.surfaceBase.withOpacity(0.8),
-                  border: Border.all(color: t.border, width: 0.5),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.add, size: 11, color: t.accentPrimary),
-                    const SizedBox(width: 3),
-                    Text('add', style: TextStyle(fontSize: 10, color: t.fgSecondary)),
-                    const SizedBox(width: 2),
-                    Icon(_expanded ? Icons.expand_less : Icons.expand_more,
-                        size: 10, color: t.fgMuted),
-                  ],
-                ),
-              ),
+    return CompositedTransformTarget(
+      link: _layerLink,
+      child: GestureDetector(
+        onTap: _toggleDropdown,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(
+              borderRadius: kShellBorderRadiusSm,
+              color: t.surfaceBase.withOpacity(0.8),
+              border: Border.all(color: t.border, width: 0.5),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.add, size: 11, color: t.accentPrimary),
+                const SizedBox(width: 3),
+                Text('add', style: TextStyle(fontSize: 10, color: t.fgSecondary)),
+                const SizedBox(width: 2),
+                Icon(_expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 10, color: t.fgMuted),
+              ],
             ),
           ),
-          if (_expanded) ...[
-            const SizedBox(height: 2),
-            Container(
-              width: 160,
-              constraints: const BoxConstraints(maxHeight: 320),
-              decoration: BoxDecoration(
-                borderRadius: kShellBorderRadiusSm,
-                color: t.surfaceBase,
-                border: Border.all(color: t.border, width: 0.5),
-              ),
-              child: ListView(
-                shrinkWrap: true,
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                children: _buildGroupedList(t),
-              ),
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -376,7 +409,7 @@ class _ComponentPaletteState extends State<ComponentPalette> {
           tokens: t,
           onTap: () {
             widget.onAdd(tmpl);
-            setState(() => _expanded = false);
+            _hideDropdown();
           },
         ));
       }

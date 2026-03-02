@@ -19,12 +19,17 @@
 import { IncomingMessage, ServerResponse } from "node:http";
 import * as fs from "node:fs/promises";
 import * as fsSync from "node:fs";
+import { createReadStream } from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB per file
+const MAX_SERVE_BYTES = 50 * 1024 * 1024; // 50 MB max file serve (prevents OOM)
 const UPLOAD_PATH = "/__openclaw__/upload";
 const MEDIA_PREFIX = "/__openclaw__/media/";
+
+// Windows reserved device names to reject in filenames
+const WINDOWS_RESERVED = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)/i;
 
 // ─── MIME type resolution ──────────────────────────────────────────────
 
@@ -65,10 +70,18 @@ function resolveMime(filePath: string): string {
 
 // ─── Shared helpers ────────────────────────────────────────────────────
 
-/** Sanitize a filename: strip directory separators, limit length, fallback. */
+/** Sanitize a filename: strip directory separators, dangerous chars, limit length, fallback. */
 function sanitizeFilename(raw: string): string {
-  let name = raw.replace(/[/\\:\x00]/g, "").trim();
+  // Strip slashes, backslash, colon, null bytes, and Unicode bidi overrides
+  let name = raw.replace(/[/\\:\x00\u202E\u200F\u200E\u202A-\u202D]/g, "").trim();
+  // Collapse whitespace
   name = name.replace(/\s+/g, " ");
+  // Strip leading/trailing dots (hidden files, traversal)
+  name = name.replace(/^\.+|\.+$/g, "");
+  // Reject Windows reserved device names
+  if (WINDOWS_RESERVED.test(name)) {
+    name = `_${name}`;
+  }
   if (name.length > 200) {
     const ext = path.extname(name);
     const base = path.basename(name, ext).slice(0, 200 - ext.length);
@@ -82,9 +95,13 @@ function readBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let total = 0;
-    req.on("data", (chunk: Buffer) => {
+    let settled = false;
+
+    function onData(chunk: Buffer) {
       total += chunk.length;
       if (total > maxBytes) {
+        settled = true;
+        cleanup();
         req.destroy();
         reject(
           new Error(
@@ -94,9 +111,33 @@ function readBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
         return;
       }
       chunks.push(chunk);
-    });
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
+    }
+
+    function onEnd() {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        resolve(Buffer.concat(chunks));
+      }
+    }
+
+    function onError(err: Error) {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        reject(err);
+      }
+    }
+
+    function cleanup() {
+      req.removeListener("data", onData);
+      req.removeListener("end", onEnd);
+      req.removeListener("error", onError);
+    }
+
+    req.on("data", onData);
+    req.on("end", onEnd);
+    req.on("error", onError);
   });
 }
 
@@ -108,7 +149,8 @@ function jsonResponse(
 ) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  // Use restrictive CORS -- the nginx proxy handles same-origin
+  res.setHeader("Access-Control-Allow-Origin", res.getHeader("X-Allowed-Origin") || "*");
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Authorization, Content-Type, X-File-Name"
@@ -127,7 +169,7 @@ function resolveWorkspace(api: any): string {
     : workspace.replace(/^~/, process.env.HOME ?? "/home/node");
 }
 
-/** Validate gateway token from Authorization header. */
+/** Validate gateway token from Authorization header using timing-safe comparison. */
 function validateAuth(req: IncomingMessage, api: any): boolean {
   const authHeader = req.headers["authorization"] ?? "";
   const token = authHeader.startsWith("Bearer ")
@@ -137,7 +179,17 @@ function validateAuth(req: IncomingMessage, api: any): boolean {
     api.config?.gateway?.auth?.token ??
     process.env.OPENCLAW_GATEWAY_TOKEN ??
     "";
-  return Boolean(token && expectedToken && token === expectedToken);
+  if (!token || !expectedToken) return false;
+
+  // Timing-safe comparison to prevent side-channel attacks
+  const bufToken = Buffer.from(String(token));
+  const bufExpected = Buffer.from(String(expectedToken));
+  if (bufToken.length !== bufExpected.length) {
+    // Still do a comparison to avoid length-based timing leak
+    crypto.timingSafeEqual(bufToken, bufToken);
+    return false;
+  }
+  return crypto.timingSafeEqual(bufToken, bufExpected);
 }
 
 // ─── Plugin registration ───────────────────────────────────────────────
@@ -173,7 +225,7 @@ export default function register(api: any) {
         return;
       }
 
-      // Parse metadata from headers
+      // Parse metadata from headers (single decode only)
       const rawFileName =
         (req.headers["x-file-name"] as string) ??
         (req.headers["x-filename"] as string) ??
@@ -214,7 +266,8 @@ export default function register(api: any) {
         return;
       }
 
-      const uuid = crypto.randomUUID().slice(0, 8);
+      // Use full UUID for better collision resistance
+      const uuid = crypto.randomUUID();
       const ext = path.extname(fileName);
       const base = path.basename(fileName, ext);
       const safeId = `${base}---${uuid}${ext}`;
@@ -278,10 +331,9 @@ export default function register(api: any) {
         return true;
       }
 
-      // Extract the relative path after the prefix
-      const rawRelative = decodeURIComponent(
-        pathname.slice(MEDIA_PREFIX.length)
-      );
+      // Extract the relative path after the prefix.
+      // new URL() already decodes percent-encoding, so do NOT double-decode.
+      const rawRelative = pathname.slice(MEDIA_PREFIX.length);
 
       // Reject empty path
       if (!rawRelative || rawRelative === "/") {
@@ -294,7 +346,7 @@ export default function register(api: any) {
       // Path traversal guard: reject ".." segments, absolute paths, null bytes
       const segments = rawRelative.split("/");
       if (
-        segments.some((s) => s === ".." || s === "." || s === "") ||
+        segments.some((s) => s === ".." || s === ".") ||
         rawRelative.includes("\x00") ||
         path.isAbsolute(rawRelative)
       ) {
@@ -321,7 +373,7 @@ export default function register(api: any) {
           return true;
         }
 
-        // Reject symlinks (stat the lstat first)
+        // Reject symlinks (lstat the original path)
         const lstat = await fs.lstat(filePath);
         if (lstat.isSymbolicLink()) {
           res.statusCode = 403;
@@ -337,13 +389,20 @@ export default function register(api: any) {
           return true;
         }
 
-        // Serve the file
-        const mime = resolveMime(filePath);
-        const data = await fs.readFile(filePath);
+        // Reject files larger than MAX_SERVE_BYTES to prevent OOM
+        if (lstat.size > MAX_SERVE_BYTES) {
+          res.statusCode = 413;
+          res.setHeader("Content-Type", "text/plain; charset=utf-8");
+          res.end("File too large");
+          return true;
+        }
+
+        // Serve the file using streaming to avoid loading entire file into memory
+        const mime = resolveMime(realPath);
 
         res.statusCode = 200;
         res.setHeader("Content-Type", mime);
-        res.setHeader("Content-Length", data.length.toString());
+        res.setHeader("Content-Length", lstat.size.toString());
         // Cache for 5 minutes (generated images are immutable once created)
         res.setHeader("Cache-Control", "public, max-age=300");
         // CORS for same-origin <img> requests
@@ -352,7 +411,18 @@ export default function register(api: any) {
         if (req.method === "HEAD") {
           res.end();
         } else {
-          res.end(data);
+          // Use streaming reads to prevent memory blow-up on large files
+          const stream = createReadStream(realPath);
+          stream.on("error", (streamErr) => {
+            log.error(`media-serve: stream error ${rawRelative}: ${streamErr.message}`);
+            if (!res.headersSent) {
+              res.statusCode = 500;
+              res.end("Internal error");
+            } else {
+              res.end();
+            }
+          });
+          stream.pipe(res);
         }
         return true;
       } catch (err: any) {

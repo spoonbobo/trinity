@@ -15,7 +15,7 @@ class ToastOverlay extends ConsumerWidget {
     return Stack(
       children: [
         child,
-        if (toast.visible && toast.message != null)
+        if (toast.visible && toast.message != null && toast.type != null)
           Positioned(
             left: 0,
             right: 0,

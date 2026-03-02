@@ -4,7 +4,8 @@
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
-  "sslRequired": "none",
+  "sslRequired": "external",
+  "passwordPolicy": "length(8) and maxLength(128) and notUsername and notEmail",
   "clients": [
     {
       "clientId": "trinity-shell",
@@ -14,7 +15,7 @@
       "publicClient": false,
       "secret": "trinity-shell-secret",
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "redirectUris": ["http://localhost/*", "http://localhost:80/*"],
       "webOrigins": ["http://localhost"],
       "attributes": {
@@ -29,8 +30,8 @@
       "publicClient": true,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
-      "redirectUris": ["*"],
-      "webOrigins": ["*"]
+      "redirectUris": ["/realms/trinity/account/*"],
+      "webOrigins": ["http://localhost"]
     }
   ],
   "roles": {

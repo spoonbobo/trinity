@@ -50,20 +50,30 @@ class ToastService {
   static OverlayEntry? _overlayEntry;
 
   static void show(BuildContext context, String message, ToastType type) {
-    _overlayEntry?.remove();
+    // Remove and null out previous entry
+    try { _overlayEntry?.remove(); } catch (_) {}
+    _overlayEntry = null;
     
-    _overlayEntry = OverlayEntry(
+    final entry = OverlayEntry(
       builder: (context) => _ToastWidget(
         message: message,
         type: type,
-        onDismiss: () => _overlayEntry?.remove(),
+        onDismiss: () {
+          try { _overlayEntry?.remove(); } catch (_) {}
+          _overlayEntry = null;
+        },
       ),
     );
+    _overlayEntry = entry;
     
-    Overlay.of(context).insert(_overlayEntry!);
+    Overlay.of(context).insert(entry);
     
     Future.delayed(const Duration(seconds: 5), () {
-      _overlayEntry?.remove();
+      // Only remove if this is still the active entry
+      if (_overlayEntry == entry) {
+        try { entry.remove(); } catch (_) {}
+        _overlayEntry = null;
+      }
     });
   }
 

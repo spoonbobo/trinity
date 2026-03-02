@@ -71,7 +71,8 @@ class GatewayClient extends ChangeNotifier {
 
   void _onMessage(dynamic raw) {
     try {
-      final rawStr = raw as String;
+      if (raw is! String) return; // Ignore binary frames
+      final rawStr = raw;
       final frame = WsFrame.parse(rawStr);
 
       switch (frame.type) {

@@ -36,6 +36,10 @@ CREATE TABLE rbac.user_roles (
   PRIMARY KEY (user_id, role_id)
 );
 
+-- Indexes for role hierarchy traversal and role-based lookups
+CREATE INDEX IF NOT EXISTS idx_roles_parent_id ON rbac.roles(parent_id);
+CREATE INDEX IF NOT EXISTS idx_user_roles_role_id ON rbac.user_roles(role_id);
+
 -- Audit log
 CREATE TABLE rbac.audit_log (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

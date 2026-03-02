@@ -23,6 +23,7 @@ if [ $count -ge 30 ]; then
   exit 1
 fi
 
+# Log partial token only (never log full token)
 echo "[vault-init] Using token: $(echo "$VAULT_TOKEN" | cut -c1-4)..."
 
 # Enable KV secrets engine v2 (ignore error if already enabled)
@@ -33,26 +34,49 @@ vault secrets enable -version=2 kv 2>/dev/null \
 
 sleep 1
 
-# Write Trinity secrets
+# Validate required env vars -- fail if critical secrets are missing or set to test values
+validate_secret() {
+  local name="$1" value="$2"
+  if [ -z "$value" ] || [ "$value" = "test" ] || [ "$value" = "test-jwt" ] || [ "$value" = "test-anon" ] || [ "$value" = "test-pg" ]; then
+    echo "[vault-init] ERROR: $name is unset or uses a test default. Set it in .env"
+    return 1
+  fi
+  return 0
+}
+
 echo "[vault-init] Writing secrets..."
 
 # Supabase secrets
-vault kv put secret/trinity/supabase \
-  jwt_secret="${SUPABASE_JWT_SECRET:-test-jwt}" \
-  anon_key="${SUPABASE_ANON_KEY:-test-anon}" \
-  postgres_password="${SUPABASE_POSTGRES_PASSWORD:-test-pg}" \
-  2>&1 || echo "[vault-init] WARN: failed to write supabase secrets"
+if validate_secret "SUPABASE_JWT_SECRET" "$SUPABASE_JWT_SECRET" && \
+   validate_secret "SUPABASE_ANON_KEY" "$SUPABASE_ANON_KEY" && \
+   validate_secret "SUPABASE_POSTGRES_PASSWORD" "$SUPABASE_POSTGRES_PASSWORD"; then
+  vault kv put secret/trinity/supabase \
+    jwt_secret="$SUPABASE_JWT_SECRET" \
+    anon_key="$SUPABASE_ANON_KEY" \
+    postgres_password="$SUPABASE_POSTGRES_PASSWORD" \
+    2>&1 || echo "[vault-init] WARN: failed to write supabase secrets"
+else
+  echo "[vault-init] WARN: Skipping supabase secrets (invalid values)"
+fi
 
 # Keycloak secrets
-vault kv put secret/trinity/keycloak \
-  admin="${KEYCLOAK_ADMIN_PASSWORD:-test}" \
-  client_secret="${KEYCLOAK_CLIENT_SECRET:-test}" \
-  2>&1 || echo "[vault-init] WARN: failed to write keycloak secrets"
+if validate_secret "KEYCLOAK_ADMIN_PASSWORD" "$KEYCLOAK_ADMIN_PASSWORD"; then
+  vault kv put secret/trinity/keycloak \
+    admin="$KEYCLOAK_ADMIN_PASSWORD" \
+    client_secret="${KEYCLOAK_CLIENT_SECRET:-}" \
+    2>&1 || echo "[vault-init] WARN: failed to write keycloak secrets"
+else
+  echo "[vault-init] WARN: Skipping keycloak secrets (invalid values)"
+fi
 
 # Auth service secrets
-vault kv put secret/trinity/auth-service \
-  token="${OPENCLAW_GATEWAY_TOKEN:-test}" \
-  2>&1 || echo "[vault-init] WARN: failed to write auth-service secrets"
+if validate_secret "OPENCLAW_GATEWAY_TOKEN" "$OPENCLAW_GATEWAY_TOKEN"; then
+  vault kv put secret/trinity/auth-service \
+    token="$OPENCLAW_GATEWAY_TOKEN" \
+    2>&1 || echo "[vault-init] WARN: failed to write auth-service secrets"
+else
+  echo "[vault-init] WARN: Skipping auth-service secrets (invalid values)"
+fi
 
 # Superadmin configuration
 vault kv put secret/trinity/superadmin \
@@ -61,5 +85,4 @@ vault kv put secret/trinity/superadmin \
   2>&1 || echo "[vault-init] WARN: failed to write superadmin config"
 
 echo "[vault-init] Secrets configured"
-echo "[vault-init] Vault UI: http://localhost:8200"
-echo "[vault-init] Token: $VAULT_TOKEN"
+echo "[vault-init] Vault ready at $VAULT_ADDR"

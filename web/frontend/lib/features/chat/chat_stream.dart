@@ -149,6 +149,9 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
               final toolCallId = role == 'tool'
                   ? (msg['toolCallId'] as String? ?? msg['id'] as String?)
                   : null;
+              // Skip empty assistant entries -- these are tool-call-only messages
+              // whose tool calls appear as separate 'tool' role entries in history.
+              if (role == 'assistant' && content.isEmpty) continue;
               // Extract image attachments from history content blocks
               final historyAttachments = _extractImageAttachments(msg['content']);
               _entries.add(ChatEntry(
@@ -382,11 +385,16 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
           setState(() {
             _agentThinking = false;
             if (_entries.isNotEmpty && _entries.last.role == 'assistant') {
-              _entries[_entries.length - 1] = _entries.last.copyWith(
-                content: text,
-                isStreaming: false,
-              );
-            } else {
+              if (text.isEmpty) {
+                // Remove the streaming placeholder -- it was a tool-only turn
+                _entries.removeLast();
+              } else {
+                _entries[_entries.length - 1] = _entries.last.copyWith(
+                  content: text,
+                  isStreaming: false,
+                );
+              }
+            } else if (text.isNotEmpty) {
               _entries.add(ChatEntry(role: 'assistant', content: text));
             }
           });
@@ -400,7 +408,9 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
                 content: text,
                 isStreaming: true,
               );
-            } else {
+            } else if (text.isNotEmpty) {
+              // Only create a new streaming entry if there's actual text.
+              // Tool-only turns show tool cards instead.
               _entries.add(ChatEntry(
                 role: 'assistant',
                 content: text,
@@ -738,6 +748,10 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
       case 'user':
         return _UserBubble(entry: entry, isNewSender: isNewSender);
       case 'assistant':
+        // Skip empty assistant entries (tool-call-only turns with no text)
+        if (entry.content.isEmpty && !entry.isStreaming) {
+          return const SizedBox.shrink();
+        }
         return _AssistantBubble(entry: entry, isNewSender: isNewSender);
       case 'tool':
         return _ToolCard(entry: entry);

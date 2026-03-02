@@ -1,6 +1,9 @@
 const WebSocket = require('ws');
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const Docker = require('dockerode');
 const { spawn } = require('child_process');
 const path = require('path');
@@ -13,11 +16,19 @@ const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN;
 const JWT_SECRET = process.env.JWT_SECRET;
 const OPENCLAW_CONTAINER = process.env.OPENCLAW_CONTAINER_NAME || 'trinity-openclaw';
 
+// ── Startup validation ─────────────────────────────────────────────────
+if (!GATEWAY_TOKEN || GATEWAY_TOKEN.length < 16) {
+  console.error('[terminal-proxy] FATAL: OPENCLAW_GATEWAY_TOKEN must be set and >= 16 characters.');
+  process.exit(1);
+}
+
+// ── Structured logging ─────────────────────────────────────────────────
 function log(level, message, meta = {}) {
   const entry = {
     timestamp: new Date().toISOString(),
     level,
     service: 'terminal-proxy',
+    message,
     ...meta,
   };
   if (level === 'error') {
@@ -29,9 +40,29 @@ function log(level, message, meta = {}) {
 
 const docker = new Docker();
 
-// Allowed OpenClaw commands (whitelist) - now loaded from registry
-// Interactive commands - now loaded from registry
+// ── Timing-safe token comparison ───────────────────────────────────────
+function timingSafeTokenCompare(a, b) {
+  if (!a || !b) return false;
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  if (bufA.length !== bufB.length) {
+    // Still do a comparison to avoid length-based timing leak
+    crypto.timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
+// ── Safe ws.send helper ────────────────────────────────────────────────
+function safeSend(ws, data) {
+  if (ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(typeof data === 'string' ? data : JSON.stringify(data));
+    } catch (_) { /* ignore send errors on closing connections */ }
+  }
+}
+
+// ── Command validation (exact word-boundary matching) ──────────────────
 function validateCommand(cmd) {
   const cleanCmd = cmd.replace(/^openclaw\s+/, '').trim();
 
@@ -44,113 +75,89 @@ function validateCommand(cmd) {
     };
   }
 
-  const baseCmd = cleanCmd.split(' ')[0];
   const allowedCommands = getAllowedCommands();
-  
+
+  // Use exact match or exact-prefix-with-space matching (word boundary)
   const isAllowed = allowedCommands.some(allowed => {
-    return cleanCmd.startsWith(allowed) || baseCmd === allowed.split(' ')[0];
+    return cleanCmd === allowed || cleanCmd.startsWith(allowed + ' ');
   });
-  
+
   return {
     isAllowed,
-    isInteractive: getInteractiveCommands().some(ic => cleanCmd.startsWith(ic)),
+    isInteractive: getInteractiveCommands().some(ic => cleanCmd === ic || cleanCmd.startsWith(ic + ' ')),
     cleanCmd,
-    baseCmd
+    baseCmd: cleanCmd.split(' ')[0]
   };
 }
 
+// ── Command execution ──────────────────────────────────────────────────
 function executeCommand(ws, cmd, token) {
   const validation = validateCommand(cmd);
-  
+
+  // Auth check FIRST, before revealing command validation details
+  if (!timingSafeTokenCompare(token, GATEWAY_TOKEN)) {
+    safeSend(ws, { type: 'error', message: 'Invalid authentication token' });
+    safeSend(ws, { type: 'exit', code: 1, message: 'Authentication failed' });
+    return null;
+  }
+
   if (!validation.isAllowed) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: `Command not allowed: ${validation.cleanCmd}. Only OpenClaw commands are permitted.`
-    }));
-    ws.send(JSON.stringify({
-      type: 'exit',
-      code: 1,
-      message: 'Command rejected'
-    }));
-    return;
+    safeSend(ws, { type: 'error', message: 'Command not permitted' });
+    safeSend(ws, { type: 'exit', code: 1, message: 'Command rejected' });
+    return null;
   }
 
-  if (token !== GATEWAY_TOKEN) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Invalid authentication token'
-    }));
-    ws.send(JSON.stringify({
-      type: 'exit',
-      code: 1,
-      message: 'Authentication failed'
-    }));
-    return;
-  }
-
-  // Execute via docker exec
+  // Execute via docker exec (use -i only, not -it since we don't have a TTY)
   const dockerCmd = ['exec'];
-  
+
   if (validation.isInteractive) {
-    dockerCmd.push('-it');
+    dockerCmd.push('-i');
   }
-  
+
   if (validation.cleanCmd.startsWith('cat ')) {
     const filePath = validation.cleanCmd.substring(4).trim();
     dockerCmd.push(OPENCLAW_CONTAINER, 'cat', filePath);
   } else if (validation.cleanCmd === 'clawhub' || validation.cleanCmd.startsWith('clawhub ')) {
-    dockerCmd.push(OPENCLAW_CONTAINER, 'clawhub', ...validation.cleanCmd.split(' ').slice(1));
+    dockerCmd.push('-w', '/home/node/.openclaw', OPENCLAW_CONTAINER, 'clawhub', ...validation.cleanCmd.split(' ').slice(1));
   } else {
     dockerCmd.push(OPENCLAW_CONTAINER, 'openclaw', ...validation.cleanCmd.split(' '));
   }
 
-  ws.send(JSON.stringify({
-    type: 'system',
-    message: `$ ${validation.cleanCmd}`
-  }));
+  safeSend(ws, { type: 'system', message: `$ ${validation.cleanCmd}` });
 
   const child = spawn('docker', dockerCmd, {
     env: { ...process.env, OPENCLAW_GATEWAY_TOKEN: token }
   });
 
   child.stdout.on('data', (data) => {
-    ws.send(JSON.stringify({
-      type: 'stdout',
-      data: data.toString()
-    }));
+    safeSend(ws, { type: 'stdout', data: data.toString() });
   });
 
   child.stderr.on('data', (data) => {
-    ws.send(JSON.stringify({
-      type: 'stderr',
-      data: data.toString()
-    }));
+    safeSend(ws, { type: 'stderr', data: data.toString() });
   });
 
   child.on('close', (code) => {
-    ws.send(JSON.stringify({
+    safeSend(ws, {
       type: 'exit',
       code: code,
       message: code === 0 ? 'Command completed successfully' : `Command exited with code ${code}`
-    }));
+    });
   });
 
   child.on('error', (err) => {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: `Failed to execute command: ${err.message}`
-    }));
+    safeSend(ws, { type: 'error', message: 'Failed to execute command' });
+    log('error', 'Child process error', { error: err.message });
   });
 
   return child;
 }
 
-const helmet = require('helmet');
-
+// ── Express app ────────────────────────────────────────────────────────
 const app = express();
 app.use(helmet());
 
-// CORS with origin restriction
+// CORS with origin restriction (reject wildcard with credentials)
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost')
   .split(',')
   .map(s => s.trim())
@@ -158,7 +165,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost')
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+    if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error(`CORS: origin ${origin} not allowed`));
@@ -169,13 +176,17 @@ app.use(cors({
 
 app.use(express.json());
 
-// Health check endpoint
+// Health check endpoint (minimal info)
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'terminal-proxy' });
+  res.json({ status: 'ok' });
 });
 
-// Get allowed commands list
+// Get allowed commands list (requires auth via query token)
 app.get('/commands', (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!timingSafeTokenCompare(token, GATEWAY_TOKEN)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
   res.json({
     allowed: getAllowedCommands(),
     interactive: getInteractiveCommands()
@@ -183,142 +194,229 @@ app.get('/commands', (req, res) => {
 });
 
 const server = app.listen(PORT, () => {
-  console.log(`Terminal Proxy Server running on port ${PORT}`);
-  console.log(`Connected to OpenClaw container: ${OPENCLAW_CONTAINER}`);
+  log('info', `Terminal Proxy Server running on port ${PORT}`);
+  log('info', `Connected to OpenClaw container: ${OPENCLAW_CONTAINER}`);
 });
 
-const wss = new WebSocket.Server({ server });
+// ── WebSocket server with security options ─────────────────────────────
+const wss = new WebSocket.Server({
+  server,
+  maxPayload: 1 * 1024 * 1024, // 1 MB max message size
+  verifyClient: (info, callback) => {
+    // Validate WebSocket origin
+    const origin = info.origin || info.req.headers.origin;
+    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+      callback(true);
+    } else {
+      log('warn', 'WebSocket connection rejected: invalid origin', { origin });
+      callback(false, 403, 'Forbidden');
+    }
+  }
+});
+
+// ── Per-connection rate limiting ───────────────────────────────────────
+const MSG_RATE_WINDOW = 10_000; // 10 seconds
+const MSG_RATE_MAX = 30;        // max 30 messages per window
+
+// ── Server-initiated heartbeat (detect dead connections) ───────────────
+const HEARTBEAT_INTERVAL = 30_000; // 30 seconds
+const heartbeatTimer = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) {
+      log('info', 'Terminating dead WebSocket connection');
+      return ws.terminate();
+    }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, HEARTBEAT_INTERVAL);
+
+wss.on('close', () => {
+  clearInterval(heartbeatTimer);
+});
 
 wss.on('connection', (ws, req) => {
-  console.log('New WebSocket connection from:', req.socket.remoteAddress);
-  
+  log('info', 'New WebSocket connection', { ip: req.socket.remoteAddress });
+
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+
   let currentProcess = null;
   let authenticated = false;
   let userRole = 'guest';
-  
+
+  // Rate limiting state
+  let msgTimestamps = [];
+
   ws.on('message', (message) => {
+    // Rate limiting
+    const now = Date.now();
+    msgTimestamps = msgTimestamps.filter(t => t > now - MSG_RATE_WINDOW);
+    if (msgTimestamps.length >= MSG_RATE_MAX) {
+      safeSend(ws, { type: 'error', message: 'Rate limit exceeded. Slow down.' });
+      return;
+    }
+    msgTimestamps.push(now);
+
     try {
       const data = JSON.parse(message);
-      
+
       switch (data.type) {
         case 'auth':
           // Accept gateway token (legacy) or JWT with role
-          if (data.token === GATEWAY_TOKEN) {
+          if (data.token && timingSafeTokenCompare(data.token, GATEWAY_TOKEN)) {
             authenticated = true;
-            userRole = data.role || 'superadmin'; // gateway token = superadmin (highest privilege)
-            ws.send(JSON.stringify({
+            // Gateway token always grants superadmin -- NEVER accept client-supplied role
+            userRole = 'superadmin';
+            safeSend(ws, {
               type: 'auth',
               status: 'ok',
               role: userRole,
               message: 'Authenticated successfully'
-            }));
+            });
           } else if (data.jwt && JWT_SECRET) {
             try {
-              const jwt = require('jsonwebtoken');
               const decoded = jwt.verify(data.jwt, JWT_SECRET);
               authenticated = true;
-              userRole = data.role || decoded.user_role || decoded.role || 'user';
-              ws.send(JSON.stringify({
+              // Role comes ONLY from verified JWT claims -- NEVER from client-supplied data
+              userRole = decoded.user_role || decoded.role || 'user';
+              safeSend(ws, {
                 type: 'auth',
                 status: 'ok',
                 role: userRole,
                 message: 'Authenticated via JWT'
-              }));
+              });
             } catch (jwtErr) {
-              ws.send(JSON.stringify({
+              safeSend(ws, {
                 type: 'auth',
                 status: 'error',
                 message: 'Invalid JWT'
-              }));
+              });
             }
           } else {
-            ws.send(JSON.stringify({
+            safeSend(ws, {
               type: 'auth',
               status: 'error',
               message: 'Invalid token'
-            }));
+            });
           }
           break;
-          
+
         case 'exec':
           if (!authenticated) {
-            ws.send(JSON.stringify({
-              type: 'error',
-              message: 'Not authenticated'
-            }));
-            log('warn', 'command rejected: not authenticated', { action: 'command.rejected' });
+            safeSend(ws, { type: 'error', message: 'Not authenticated' });
+            log('warn', 'Command rejected: not authenticated', { action: 'command.rejected' });
             return;
           }
-          
+
           if (data.command) {
             const tier = getRoleTier(userRole);
             const validation = validateCommand(data.command);
             if (!isCommandAllowedForTier(validation.cleanCmd, tier)) {
-              log('warn', 'command denied: insufficient tier', { 
-                command: validation.cleanCmd, 
-                userRole, 
+              log('warn', 'Command denied: insufficient tier', {
+                command: validation.cleanCmd,
+                userRole,
                 tier,
                 action: 'command.denied'
               });
-              ws.send(JSON.stringify({
+              safeSend(ws, {
                 type: 'error',
                 message: `Permission denied: "${validation.cleanCmd}" requires higher access (your role: ${userRole})`
-              }));
-              ws.send(JSON.stringify({
-                type: 'exit',
-                code: 1,
-                message: 'Permission denied'
-              }));
+              });
+              safeSend(ws, { type: 'exit', code: 1, message: 'Permission denied' });
               break;
             }
-            log('info', 'command executed', { 
-              command: validation.cleanCmd, 
-              userRole, 
+
+            // Kill previous process before starting new one (prevent orphans)
+            if (currentProcess) {
+              try { currentProcess.kill('SIGKILL'); } catch (_) {}
+              currentProcess = null;
+            }
+
+            log('info', 'Command executed', {
+              command: validation.cleanCmd,
+              userRole,
               tier,
               action: 'command.executed'
             });
             currentProcess = executeCommand(ws, data.command, GATEWAY_TOKEN);
           }
           break;
-          
+
         case 'cancel':
           if (currentProcess) {
-            currentProcess.kill();
-            ws.send(JSON.stringify({
-              type: 'system',
-              message: 'Command cancelled'
-            }));
+            try { currentProcess.kill('SIGTERM'); } catch (_) {}
+            // Follow up with SIGKILL after 3 seconds if still alive
+            const proc = currentProcess;
+            setTimeout(() => {
+              try { if (!proc.killed) proc.kill('SIGKILL'); } catch (_) {}
+            }, 3000);
+            safeSend(ws, { type: 'system', message: 'Command cancelled' });
+            currentProcess = null;
           }
           break;
-          
+
         case 'ping':
-          ws.send(JSON.stringify({ type: 'pong' }));
+          safeSend(ws, { type: 'pong' });
           break;
-          
+
         default:
-          ws.send(JSON.stringify({
-            type: 'error',
-            message: `Unknown message type: ${data.type}`
-          }));
+          safeSend(ws, { type: 'error', message: 'Unknown message type' });
       }
     } catch (err) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        message: 'Invalid JSON message'
-      }));
+      safeSend(ws, { type: 'error', message: 'Invalid JSON message' });
     }
   });
-  
+
   ws.on('close', () => {
-    console.log('WebSocket connection closed');
+    log('info', 'WebSocket connection closed');
     if (currentProcess) {
-      currentProcess.kill();
+      try { currentProcess.kill('SIGKILL'); } catch (_) {}
+      currentProcess = null;
     }
   });
-  
+
   ws.on('error', (err) => {
-    console.error('WebSocket error:', err);
+    log('error', 'WebSocket error', { error: err.message });
   });
 });
 
-console.log('Terminal Proxy initialized');
+// ── Graceful shutdown ──────────────────────────────────────────────────
+function gracefulShutdown(signal) {
+  log('info', `Received ${signal}, shutting down gracefully`);
+  clearInterval(heartbeatTimer);
+
+  // Close all WebSocket connections
+  wss.clients.forEach((ws) => {
+    safeSend(ws, { type: 'system', message: 'Server shutting down' });
+    ws.terminate();
+  });
+
+  wss.close(() => {
+    server.close(() => {
+      log('info', 'Server closed');
+      process.exit(0);
+    });
+  });
+
+  // Force exit after 10 seconds
+  setTimeout(() => {
+    log('error', 'Forced shutdown after timeout');
+    process.exit(1);
+  }, 10_000).unref();
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// ── Global error handlers ──────────────────────────────────────────────
+process.on('unhandledRejection', (reason) => {
+  log('error', 'Unhandled rejection', { error: String(reason) });
+});
+
+process.on('uncaughtException', (err) => {
+  log('error', 'Uncaught exception', { error: err.message, stack: err.stack });
+  process.exit(1);
+});
+
+log('info', 'Terminal Proxy initialized');

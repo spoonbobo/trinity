@@ -123,6 +123,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
   void _pollSSOPopup(html.WindowBase? popup, html.EventListener messageHandler) {
     if (popup == null) {
+      html.window.removeEventListener('message', messageHandler);
       setState(() => _loading = false);
       return;
     }
@@ -136,7 +137,12 @@ class _LoginPageState extends ConsumerState<LoginPage> {
           return false; // Stop polling
         }
       } catch (_) {}
-      return mounted && _loading; // Keep polling while loading
+      if (!mounted || !_loading) {
+        // Widget disposed or login completed -- clean up listener
+        html.window.removeEventListener('message', messageHandler);
+        return false;
+      }
+      return true; // Keep polling
     });
   }
 

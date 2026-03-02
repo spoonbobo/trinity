@@ -5,6 +5,7 @@ function log(level, message, meta = {}) {
     timestamp: new Date().toISOString(),
     level,
     service: 'auth-service',
+    message,
     ...meta,
   };
   if (level === 'error') {
@@ -38,23 +39,40 @@ async function getUserRoleName(userId) {
   return result.rows[0]?.role_name || null;
 }
 
+// Fixed: wrap DELETE+INSERT in a transaction to prevent users from being left with zero roles
 async function assignRole(userId, roleName, grantedBy) {
-  const roleResult = await pool.query(
-    'SELECT id FROM rbac.roles WHERE name = $1',
-    [roleName]
-  );
-  if (roleResult.rows.length === 0) throw new Error(`Role not found: ${roleName}`);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  await pool.query('DELETE FROM rbac.user_roles WHERE user_id = $1', [userId]);
+    const roleResult = await client.query(
+      'SELECT id FROM rbac.roles WHERE name = $1',
+      [roleName]
+    );
+    if (roleResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      throw new Error(`Role not found: ${roleName}`);
+    }
 
-  await pool.query(
-    'INSERT INTO rbac.user_roles (user_id, role_id, granted_by) VALUES ($1, $2, $3)',
-    [userId, roleResult.rows[0].id, grantedBy]
-  );
+    await client.query('DELETE FROM rbac.user_roles WHERE user_id = $1', [userId]);
+    await client.query(
+      'INSERT INTO rbac.user_roles (user_id, role_id, granted_by) VALUES ($1, $2, $3)',
+      [userId, roleResult.rows[0].id, grantedBy]
+    );
 
-  log('info', 'RBAC: role assigned', { userId, role: roleName, grantedBy, action: 'role.assigned' });
-  
-  await writeAuditLog(grantedBy, 'role.assigned', `user:${userId}`, { role: roleName }, null);
+    await client.query('COMMIT');
+
+    log('info', 'RBAC: role assigned', { userId, role: roleName, grantedBy, action: 'role.assigned' });
+
+    // Audit log is best-effort -- don't let failures crash the flow
+    writeAuditLog(grantedBy || userId, 'role.assigned', `user:${userId}`, { role: roleName }, null)
+      .catch((err) => log('error', 'Audit log write failed', { error: err.message }));
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function ensureUserRole(userId, defaultRole = 'user') {
@@ -87,9 +105,13 @@ async function writeAuditLog(userId, action, resource, metadata, ip) {
 }
 
 async function getAuditLog(limit = 100, offset = 0) {
+  // Clamp limit/offset to prevent DoS via huge result sets
+  const safeLimit = Math.max(1, Math.min(parseInt(limit, 10) || 100, 1000));
+  const safeOffset = Math.max(0, parseInt(offset, 10) || 0);
+
   const result = await pool.query(
     'SELECT * FROM rbac.audit_log ORDER BY created_at DESC LIMIT $1 OFFSET $2',
-    [limit, offset]
+    [safeLimit, safeOffset]
   );
   return result.rows;
 }
@@ -116,7 +138,8 @@ async function ensureRole(userId, roleName, grantedBy = null) {
 
   if (result.rows.length > 0) {
     log('info', 'RBAC: role ensured', { userId, role: roleName, grantedBy, action: 'role.ensured' });
-    await writeAuditLog(grantedBy, 'role.ensured', `user:${userId}`, { role: roleName }, null);
+    writeAuditLog(grantedBy || userId, 'role.ensured', `user:${userId}`, { role: roleName }, null)
+      .catch((err) => log('error', 'Audit log write failed', { error: err.message }));
   }
 }
 
@@ -174,6 +197,13 @@ async function setRolePermissions(roleName, permissionActions) {
         [permissionActions]
       );
 
+      // Warn if some permissions were not found
+      const found = permResult.rows.map(p => p.action);
+      const missing = permissionActions.filter(a => !found.includes(a));
+      if (missing.length > 0) {
+        log('warn', 'Some permissions not found in DB', { missing, action: 'permissions.partial' });
+      }
+
       for (const perm of permResult.rows) {
         await client.query(
           'INSERT INTO rbac.role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
@@ -185,7 +215,7 @@ async function setRolePermissions(roleName, permissionActions) {
     await client.query('COMMIT');
     log('info', 'RBAC: role permissions updated', { role: roleName, count: permissionActions.length, action: 'permissions.updated' });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     throw err;
   } finally {
     client.release();

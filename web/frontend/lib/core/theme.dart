@@ -74,7 +74,7 @@ bool appFontFamilyIsMono(AppFontFamily family) {
 }
 
 /// Returns the font family name as declared in pubspec.yaml
-String _fontFamilyName(AppFontFamily family) {
+String fontFamilyName(AppFontFamily family) {
   switch (family) {
     case AppFontFamily.ibmPlexMono:
       return 'IBMPlexMono';
@@ -90,7 +90,7 @@ String _fontFamilyName(AppFontFamily family) {
 }
 
 TextTheme applyAppFontToTextTheme(AppFontFamily family, TextTheme base) {
-  final fontName = _fontFamilyName(family);
+  final fontName = fontFamilyName(family);
   return base.apply(fontFamily: fontName);
 }
 
@@ -101,7 +101,7 @@ TextStyle appFontStyle(
   double? fontSize,
 }) {
   return (textStyle ?? const TextStyle()).copyWith(
-    fontFamily: _fontFamilyName(family),
+    fontFamily: fontFamilyName(family),
     color: color ?? textStyle?.color,
     fontSize: fontSize ?? textStyle?.fontSize,
   );
@@ -174,7 +174,9 @@ class ShellTokens {
 
   // convenience ----------------------------------------------------------
   static ShellTokens of(BuildContext context) {
-    return Theme.of(context).extension<ShellTokensTheme>()!.tokens;
+    final ext = Theme.of(context).extension<ShellTokensTheme>();
+    assert(ext != null, 'ShellTokensTheme not found in theme extensions');
+    return ext?.tokens ?? darkTokens;
   }
 }
 

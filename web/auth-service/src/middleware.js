@@ -16,6 +16,7 @@ function log(level, message, meta = {}) {
     timestamp: new Date().toISOString(),
     level,
     service: 'auth-service',
+    message,
     ...meta,
   };
   if (level === 'error') {
@@ -43,7 +44,8 @@ function verifyToken(req, res, next) {
       raw: decoded,
       isGuest: false,
     };
-    log('info', 'login: success', { userId, email: decoded.email, action: 'login.success' });
+    // Only log on session-creation endpoints, not every authenticated request
+    // (login.success logging moved to /auth/session and /auth/me first-call)
     next();
   } catch (err) {
     log('warn', 'login: failed', { error: err.message, action: 'login.failed' });
@@ -68,9 +70,10 @@ async function resolveRole(req, res, next) {
     req.user.permissions = permissions;
     next();
   } catch (err) {
+    // On DB failure, fail closed: assign guest with safe-tier permissions only
     console.error('[auth] Role resolution error:', err.message);
-    req.user.role = 'user';
-    req.user.permissions = [];
+    req.user.role = GUEST_ROLE;
+    req.user.permissions = getPermissionsByTier('safe');
     next();
   }
 }
@@ -85,7 +88,9 @@ function requirePermission(action) {
         ip: req.ip,
         action: 'permission.denied'
       });
-      writeAuditLog(req.user.id, 'permission.denied', action, { role: req.user.role }, req.ip);
+      // Best-effort audit log -- don't crash if it fails
+      writeAuditLog(req.user.id, 'permission.denied', action, { role: req.user.role }, req.ip)
+        .catch((err) => console.error('[auth] Audit log write failed:', err.message));
       return res.status(403).json({
         error: 'Forbidden',
         required: action,

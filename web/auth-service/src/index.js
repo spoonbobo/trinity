@@ -3,17 +3,28 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { ensureRole } = require('./rbac');
+const { pool } = require('./db');
 const { verifyToken, resolveRole } = require('./middleware');
 const authRoutes = require('./routes/auth');
 const usersRoutes = require('./routes/users');
 
 const app = express();
-const PORT = parseInt(process.env.AUTH_SERVICE_PORT || '18791');
+const PORT = parseInt(process.env.AUTH_SERVICE_PORT || '18791', 10);
 
-// Security: helmet for standard security headers
-app.use(helmet());
+// Security: helmet for standard security headers (API-only service, strict CSP)
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+    },
+  },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+  },
+}));
 
-// Security: CORS with origin restriction
+// Security: CORS with origin restriction (reject wildcard with credentials)
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost')
   .split(',')
   .map(s => s.trim())
@@ -22,7 +33,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost')
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (server-to-server, curl, etc.)
-    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+    if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error(`CORS: origin ${origin} not allowed`));
@@ -31,7 +42,7 @@ app.use(cors({
   credentials: true,
 }));
 
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
 
 // Rate limiting on auth endpoints
 const authLimiter = rateLimit({
@@ -167,7 +178,43 @@ async function ensureDefaultSuperadmin() {
   }
 }
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[auth-service] listening on port ${PORT}`);
-  ensureDefaultSuperadmin();
+// ── Server start ───────────────────────────────────────────────────────
+let serverInstance;
+
+async function start() {
+  // Run superadmin bootstrap BEFORE accepting requests
+  await ensureDefaultSuperadmin();
+
+  serverInstance = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[auth-service] listening on port ${PORT}`);
+  });
+}
+
+start().catch((err) => {
+  console.error('[auth-service] Failed to start:', err.message);
+  process.exit(1);
+});
+
+// ── Graceful shutdown ──────────────────────────────────────────────────
+function gracefulShutdown(signal) {
+  console.log(`[auth-service] Received ${signal}, shutting down gracefully`);
+  if (serverInstance) {
+    serverInstance.close(() => {
+      pool.end().then(() => {
+        console.log('[auth-service] Closed');
+        process.exit(0);
+      }).catch(() => process.exit(0));
+    });
+  } else {
+    process.exit(0);
+  }
+  // Force exit after 10 seconds
+  setTimeout(() => process.exit(1), 10_000).unref();
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[auth-service] Unhandled rejection:', String(reason));
 });

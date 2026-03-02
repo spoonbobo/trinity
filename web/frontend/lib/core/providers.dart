@@ -35,7 +35,7 @@ final gatewayClientProvider = ChangeNotifierProvider<gw.GatewayClient>((ref) {
 });
 
 final terminalClientProvider = ChangeNotifierProvider<TerminalProxyClient>((ref) {
-  final authState = ref.watch(authClientProvider).state;
+  final authState = ref.read(authClientProvider).state;
   final role = roleToString(authState.role);
   return TerminalProxyClient(url: _terminalWsUrl, auth: _sharedAuth, role: role);
 });

@@ -1,8 +1,6 @@
 const A2UI_MARKER = "__A2UI__";
 
 export default function register(api: any) {
-  let latestSurface: string | null = null;
-
   api.registerTool({
     name: "canvas_ui",
     description: `Render visual content in the Canvas panel. MANDATORY for any UI output — never describe UI in chat text. Pass A2UI v0.8 JSONL as the 'jsonl' parameter: one JSON object per line. You MUST include a surfaceUpdate (with components) and a beginRendering (with root id). See the system prompt for the full component catalog and examples.`,
@@ -29,7 +27,36 @@ export default function register(api: any) {
           ],
         };
       }
-      latestSurface = params.jsonl;
+
+      // Size limit to prevent DoS on client renderer (512 KB)
+      if (params.jsonl.length > 512 * 1024) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Error: JSONL payload exceeds 512KB limit. Please reduce the surface complexity.",
+            },
+          ],
+        };
+      }
+
+      // Validate that each line is parseable JSON
+      const lines = params.jsonl.trim().split("\n").filter(l => l.trim().length > 0);
+      for (let i = 0; i < lines.length; i++) {
+        try {
+          JSON.parse(lines[i]);
+        } catch {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Error: JSONL line ${i + 1} is not valid JSON. Please fix and retry.`,
+              },
+            ],
+          };
+        }
+      }
+
       return {
         content: [
           {
@@ -40,5 +67,4 @@ export default function register(api: any) {
       };
     },
   });
-
 }
