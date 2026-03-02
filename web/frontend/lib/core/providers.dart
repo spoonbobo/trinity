@@ -2,7 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'gateway_client.dart' as gw;
 import 'auth.dart';
 import 'terminal_client.dart';
-import 'auth_client.dart';
+import 'auth_client.dart' show AuthClient, AuthRole, roleToString;
 
 const _authBaseUrl = String.fromEnvironment(
   'AUTH_SERVICE_URL',
@@ -39,6 +39,14 @@ final terminalClientProvider = ChangeNotifierProvider<TerminalProxyClient>((ref)
   final role = roleToString(authState.role);
   return TerminalProxyClient(url: _terminalWsUrl, auth: _sharedAuth, role: role);
 });
+
+/// Create an independent TerminalProxyClient for scoped use (e.g. per-channel
+/// onboarding terminal). Caller is responsible for calling dispose() when done.
+TerminalProxyClient createScopedTerminalClient(WidgetRef ref) {
+  final authState = ref.read(authClientProvider).state;
+  final role = roleToString(authState.role);
+  return TerminalProxyClient(url: _terminalWsUrl, auth: _sharedAuth, role: role);
+}
 
 /// Active session key — defaults to 'main'.
 final activeSessionProvider = StateProvider<String>((ref) => 'main');
