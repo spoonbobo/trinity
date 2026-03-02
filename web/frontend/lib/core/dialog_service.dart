@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Centralized dialog manager that prevents duplicate dialogs from stacking.
 ///
@@ -9,7 +10,7 @@ import 'package:flutter/material.dart';
 ///     builder: (_) => const SettingsDialog(),
 ///   );
 ///
-/// If a dialog with the same [id] is already open, the call is a no-op.
+/// If a dialog with the same [id] isn't already open, the call is a no-op.
 /// When the dialog closes (by any means), the id is automatically released.
 class DialogService {
   DialogService._();
@@ -17,8 +18,15 @@ class DialogService {
 
   final Set<String> _openDialogs = {};
 
+  /// Notifier that tracks whether any dialog is currently open
+  /// Use with ValueListenableBuilder to conditionally disable pointer events on widgets behind dialogs
+  final ValueNotifier<bool> dialogIsOpenNotifier = ValueNotifier<bool>(false);
+
   /// Whether a dialog with [id] is currently open.
   bool isOpen(String id) => _openDialogs.contains(id);
+
+  /// Whether any dialog is currently open.
+  bool get hasOpenDialogs => _openDialogs.isNotEmpty;
 
   /// Show a dialog if one with the same [id] isn't already open.
   ///
@@ -32,20 +40,28 @@ class DialogService {
     Color? barrierColor,
   }) {
     if (_openDialogs.contains(id)) return Future.value(null);
-    // Guard against deactivated/unmounted context
     if (!context.mounted) return Future.value(null);
+
     _openDialogs.add(id);
+    dialogIsOpenNotifier.value = true;
+
     try {
       return showDialog<T>(
         context: context,
         barrierDismissible: barrierDismissible,
         barrierColor: barrierColor,
         builder: builder,
-      ).whenComplete(() => _openDialogs.remove(id));
+      ).whenComplete(() {
+        _openDialogs.remove(id);
+        if (_openDialogs.isEmpty) {
+          dialogIsOpenNotifier.value = false;
+        }
+      });
     } catch (e) {
-      // If showDialog throws synchronously (e.g., no Navigator ancestor),
-      // release the ID so the dialog type isn't permanently disabled.
       _openDialogs.remove(id);
+      if (_openDialogs.isEmpty) {
+        dialogIsOpenNotifier.value = false;
+      }
       return Future.value(null);
     }
   }

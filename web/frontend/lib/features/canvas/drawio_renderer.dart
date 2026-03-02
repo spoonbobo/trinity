@@ -2,24 +2,34 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
 import 'dart:js_util' as js_util;
+import 'dart:typed_data';
 import 'dart:ui_web' as ui_web;
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme.dart';
+import '../../main.dart' show themeModeProvider;
 
 /// Embeds the diagrams.net (draw.io) editor via iframe + postMessage API.
 /// Supports PNG export and copy-to-clipboard.
-class DrawIORenderer extends StatefulWidget {
-  const DrawIORenderer({super.key});
+/// Uses minimal interface (light) or full dark interface based on app theme.
+class DrawIORenderer extends ConsumerStatefulWidget {
+  final bool dialogIsOpen;
+
+  const DrawIORenderer({
+    super.key,
+    this.dialogIsOpen = false,
+  });
 
   @override
-  State<DrawIORenderer> createState() => DrawIORendererState();
+  ConsumerState<DrawIORenderer> createState() => DrawIORendererState();
 }
 
-class DrawIORendererState extends State<DrawIORenderer> {
+class DrawIORendererState extends ConsumerState<DrawIORenderer> {
   html.IFrameElement? _iframe;
-  late final String _viewType;
+  late String _viewType;
   StreamSubscription? _messageSub;
   bool _ready = false;
+  ThemeMode? _lastThemeMode;
 
   // Export callback — set temporarily while waiting for an export response.
   void Function(String format, String data)? _pendingExport;
@@ -28,13 +38,51 @@ class DrawIORendererState extends State<DrawIORenderer> {
   void initState() {
     super.initState();
     _viewType = 'drawio-${identityHashCode(this)}';
+    _lastThemeMode = ref.read(themeModeProvider);
     _setupIframe();
     _listenMessages();
   }
 
+  @override
+  void didUpdateWidget(DrawIORenderer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dialogIsOpen != widget.dialogIsOpen) {
+      if (widget.dialogIsOpen) {
+        disablePointerEvents();
+      } else {
+        enablePointerEvents();
+      }
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Check if theme changed and reload iframe
+    final currentTheme = ref.read(themeModeProvider);
+    if (_lastThemeMode != currentTheme) {
+      _lastThemeMode = currentTheme;
+      _reloadWithTheme();
+    }
+  }
+
+  /// Check if current theme is dark
+  bool _isDarkMode() {
+    final themeMode = ref.read(themeModeProvider);
+    final brightness = Theme.of(context).brightness;
+
+    return switch (themeMode) {
+      ThemeMode.dark => true,
+      ThemeMode.light => false,
+      ThemeMode.system => brightness == Brightness.dark,
+    };
+  }
+
   void _setupIframe() {
+    final uiTheme = _getDrawIOTheme();
     final params = {
       'embed': '1',
+      'ui': uiTheme,
       'proto': 'json',
       'spin': '1',
       'saveAndExit': '0',
@@ -57,6 +105,44 @@ class DrawIORendererState extends State<DrawIORenderer> {
       _viewType,
       (int viewId) => _iframe!,
     );
+  }
+
+  void _reloadWithTheme() {
+    // Create new iframe with updated theme
+    final newViewType = 'drawio-${identityHashCode(this)}-${DateTime.now().millisecondsSinceEpoch}';
+    final uiTheme = _getDrawIOTheme();
+
+    final params = {
+      'embed': '1',
+      'ui': uiTheme,
+      'proto': 'json',
+      'spin': '1',
+      'saveAndExit': '0',
+      'noSaveBtn': '1',
+      'noExitBtn': '1',
+    };
+    final qs = params.entries
+        .map((e) =>
+            '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
+        .join('&');
+
+    final newIframe = html.IFrameElement()
+      ..src = 'https://embed.diagrams.net/?$qs'
+      ..style.width = '100%'
+      ..style.height = '100%'
+      ..style.border = 'none'
+      ..allow = 'clipboard-read; clipboard-write';
+
+    ui_web.platformViewRegistry.registerViewFactory(
+      newViewType,
+      (int viewId) => newIframe,
+    );
+
+    setState(() {
+      _viewType = newViewType;
+      _iframe = newIframe;
+      _ready = false;
+    });
   }
 
   void _listenMessages() {
@@ -95,8 +181,34 @@ class DrawIORendererState extends State<DrawIORenderer> {
     }
   }
 
+  /// Get draw.io UI theme - adaptive to app theme
+  String _getDrawIOTheme() {
+    // Minimal UI for light mode, full dark UI for dark mode
+    return _isDarkMode() ? 'dark' : 'min';
+  }
+
   void _post(Map<String, dynamic> message) {
     _iframe?.contentWindow?.postMessage(jsonEncode(message), '*');
+  }
+
+  /// Blur the iframe to return focus to parent window
+  void blur() {
+    _iframe?.blur();
+  }
+
+  /// Focus the iframe
+  void focus() {
+    _iframe?.focus();
+  }
+
+  /// Disable pointer events on iframe - allows clicks to pass through to Flutter widgets
+  void disablePointerEvents() {
+    _iframe?.style.pointerEvents = 'none';
+  }
+
+  /// Enable pointer events on iframe - restore normal interaction
+  void enablePointerEvents() {
+    _iframe?.style.pointerEvents = 'auto';
   }
 
   /// Request PNG export from draw.io and download it.
@@ -156,10 +268,6 @@ class DrawIORendererState extends State<DrawIORenderer> {
 
   @override
   Widget build(BuildContext context) {
-    // The iframe is an HTML platform view — it renders above Flutter widgets
-    // in the browser DOM.  draw.io shows its own loading spinner (spin=1),
-    // so we do NOT overlay a Flutter loading indicator (it would be invisible
-    // underneath the iframe anyway).
     return HtmlElementView(viewType: _viewType);
   }
 }

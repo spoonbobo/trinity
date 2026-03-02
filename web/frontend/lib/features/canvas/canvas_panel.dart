@@ -2,43 +2,86 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 import '../../core/theme.dart';
+import '../../core/dialog_service.dart';
 import 'canvas_mode_provider.dart';
 import 'a2ui_renderer.dart';
 import 'drawio_renderer.dart';
 
 /// Unified canvas panel: A2UI | DrawIO.
 /// Mode toggle and draw.io toolbar fixed at bottom-right.
-class CanvasPanel extends ConsumerWidget {
+class CanvasPanel extends ConsumerStatefulWidget {
   const CanvasPanel({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CanvasPanel> createState() => _CanvasPanelState();
+}
+
+class _CanvasPanelState extends ConsumerState<CanvasPanel> {
+  final GlobalKey<DrawIORendererState> _drawioKey = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
     final mode = ref.watch(canvasModeProvider);
     final modeNotifier = ref.read(canvasModeProvider.notifier);
     final t = ShellTokens.of(context);
 
     return Stack(
       children: [
-        // Renderer
+        // Renderer area
         Positioned.fill(
           child: switch (mode) {
             CanvasMode.a2ui => const A2UIRendererPanel(),
-            CanvasMode.drawio => const _DrawIOWrapper(),
+            CanvasMode.drawio => ValueListenableBuilder<bool>(
+                valueListenable: DialogService.instance.dialogIsOpenNotifier,
+                builder: (context, dialogIsOpen, child) => DrawIORenderer(
+                  key: _drawioKey,
+                  dialogIsOpen: dialogIsOpen,
+                ),
+              ),
           },
         ),
 
-        // Mode toggle – bottom-right, fixed position
+        // Mode toggle – bottom-right
         Positioned(
           bottom: 4,
           right: 4,
           child: PointerInterceptor(
             child: _ModeToggle(
               currentMode: mode,
-              onModeChanged: modeNotifier.setMode,
+              onModeChanged: (newMode) {
+                modeNotifier.setMode(newMode);
+              },
               tokens: t,
             ),
           ),
         ),
+
+        // Draw.io toolbar – bottom-right above mode toggle
+        if (mode == CanvasMode.drawio)
+          Positioned(
+            bottom: 36,
+            right: 4,
+            child: PointerInterceptor(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _SmallButton(
+                    icon: Icons.content_copy,
+                    tooltip: 'copy image',
+                    onTap: () => _drawioKey.currentState?.copyPng(),
+                    tokens: t,
+                  ),
+                  const SizedBox(width: 2),
+                  _SmallButton(
+                    icon: Icons.download,
+                    tooltip: 'export PNG',
+                    onTap: () => _drawioKey.currentState?.exportPng(),
+                    tokens: t,
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -135,52 +178,6 @@ class _ModeButton extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Draw.io wrapper – copy/export buttons at bottom-right
-// ---------------------------------------------------------------------------
-
-class _DrawIOWrapper extends StatelessWidget {
-  const _DrawIOWrapper();
-
-  @override
-  Widget build(BuildContext context) {
-    final t = ShellTokens.of(context);
-    final key = GlobalKey<DrawIORendererState>();
-
-    return Stack(
-      children: [
-        Positioned.fill(child: DrawIORenderer(key: key)),
-
-        // Toolbar buttons – bottom-right, above mode toggle
-        Positioned(
-          bottom: 36, // Above mode toggle (toggle is ~28px tall + 4px padding)
-          right: 4,
-          child: PointerInterceptor(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _SmallButton(
-                  icon: Icons.content_copy,
-                  tooltip: 'copy image',
-                  onTap: () => key.currentState?.copyPng(),
-                  tokens: t,
-                ),
-                const SizedBox(width: 2),
-                _SmallButton(
-                  icon: Icons.download,
-                  tooltip: 'export PNG',
-                  onTap: () => key.currentState?.exportPng(),
-                  tokens: t,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

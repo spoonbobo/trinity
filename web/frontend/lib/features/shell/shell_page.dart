@@ -7,11 +7,12 @@ import '../../core/gateway_client.dart' as gw;
 import '../../core/theme.dart';
 import '../../core/i18n.dart';
 import '../../core/providers.dart';
+import '../../core/toast_provider.dart';
 import '../../models/ws_frame.dart';
 import '../../main.dart' show languageProvider, authClientProvider;
 import '../prompt_bar/prompt_bar.dart';
 import '../chat/chat_stream.dart';
-import '../canvas/a2ui_renderer.dart';
+import '../canvas/canvas_panel.dart';
 import '../governance/approval_panel.dart';
 import '../catalog/skills_cron_dialog.dart';
 import '../automations/automations_dialog.dart';
@@ -54,6 +55,8 @@ class _ShellPageState extends ConsumerState<ShellPage> {
   bool _dividerHovered = false;
   // Mobile: which panel is visible (0=chat, 1=canvas)
   int _mobilePanel = 0;
+  // Track previous gateway state for reconnect toasts
+  gw.ConnectionState? _prevGatewayState;
 
   @override
   void initState() {
@@ -95,6 +98,9 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final client = ref.read(gatewayClientProvider);
+      // Track connection state changes for reconnect toasts
+      _prevGatewayState = client.state;
+      client.addListener(_onGatewayStateChange);
       client.connect().catchError((e) {
         debugPrint('[Shell] connect failed: $e');
       });
@@ -114,6 +120,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_globalKeyHandler);
+    ref.read(gatewayClientProvider).removeListener(_onGatewayStateChange);
     _approvalSub?.cancel();
     _notifSub?.cancel();
     _dragEnterSub?.cancel();
@@ -121,6 +128,36 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     _dragLeaveSub?.cancel();
     _dropSub?.cancel();
     super.dispose();
+  }
+
+  void _onGatewayStateChange() {
+    if (!mounted) return;
+    final client = ref.read(gatewayClientProvider);
+    final current = client.state;
+    final prev = _prevGatewayState;
+    _prevGatewayState = current;
+
+    // Skip the initial connecting -> connected transition on first load
+    if (prev == gw.ConnectionState.connecting && current == gw.ConnectionState.connected && prev == _prevGatewayState) {
+      return;
+    }
+
+    // Disconnected or error: show "reconnecting" toast
+    if ((current == gw.ConnectionState.disconnected || current == gw.ConnectionState.error) &&
+        prev == gw.ConnectionState.connected) {
+      ToastService.showError(context, 'gateway disconnected, reconnecting...');
+    }
+
+    // Reconnected: show "reconnected" toast
+    if (current == gw.ConnectionState.connected &&
+        (prev == gw.ConnectionState.disconnected ||
+         prev == gw.ConnectionState.error ||
+         prev == gw.ConnectionState.connecting)) {
+      // Only show reconnect toast if we were previously connected (not first connect)
+      if (prev != gw.ConnectionState.connecting) {
+        ToastService.showInfo(context, 'reconnected');
+      }
+    }
   }
 
   bool _globalKeyHandler(KeyEvent event) {
@@ -288,7 +325,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
                         Expanded(
                           child: _mobilePanel == 0
                               ? const ChatStreamView()
-                              : const A2UIRendererPanel(),
+                              : const CanvasPanel(),
                         )
                       else ...[
                         Expanded(
@@ -332,7 +369,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
                         ),
                         Expanded(
                           flex: canvasFlex,
-                          child: const A2UIRendererPanel(),
+                          child: const CanvasPanel(),
                         ),
                         if (_showGovernance)
                           Expanded(
@@ -470,7 +507,8 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     final language = ref.watch(languageProvider);
     final authState = ref.watch(authClientProvider).state;
     final isAdmin = authState.hasPermission('users.list');
-    final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(color: t.fgMuted);
+    final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(color: t.fgMuted)
+        ?? TextStyle(fontSize: 10, color: t.fgMuted);
     final unreadCount = ref.watch(notificationProvider).unreadCount;
     final activeSession = ref.watch(activeSessionProvider);
 
@@ -496,11 +534,42 @@ class _ShellPageState extends ConsumerState<ShellPage> {
               ),
             ),
           ),
-          Tooltip(
-            message: dotLabel,
-            child: Container(
-              width: 6, height: 6,
-              decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+          GestureDetector(
+            onTap: state != gw.ConnectionState.connected && state != gw.ConnectionState.connecting
+                ? () {
+                    ref.read(gatewayClientProvider).connect().catchError((_) {});
+                    ref.read(terminalClientProvider).connect().catchError((_) {});
+                  }
+                : null,
+            child: MouseRegion(
+              cursor: state != gw.ConnectionState.connected && state != gw.ConnectionState.connecting
+                  ? SystemMouseCursors.click
+                  : SystemMouseCursors.basic,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Tooltip(
+                    message: state != gw.ConnectionState.connected ? 'click to reconnect' : dotLabel,
+                    child: Container(
+                      width: 6, height: 6,
+                      decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+                    ),
+                  ),
+                  // Show text label when not connected (clickable)
+                  if (state != gw.ConnectionState.connected) ...[
+                    const SizedBox(width: 4),
+                    Text(
+                      dotLabel,
+                      style: TextStyle(fontSize: 9, color: dotColor),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'reconnect',
+                      style: TextStyle(fontSize: 9, color: t.accentPrimary),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 6),
