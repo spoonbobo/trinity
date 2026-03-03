@@ -5,6 +5,7 @@ import 'dart:html' as html;
 enum CanvasMode {
   a2ui,
   drawio,
+  browser,
 }
 
 /// DrawIO theme options
@@ -42,6 +43,8 @@ class CanvasModeNotifier extends StateNotifier<CanvasMode> {
     switch (stored) {
       case 'drawio':
         return CanvasMode.drawio;
+      case 'browser':
+        return CanvasMode.browser;
       case 'a2ui':
       default:
         return CanvasMode.a2ui;
@@ -60,9 +63,13 @@ class CanvasModeNotifier extends StateNotifier<CanvasMode> {
     }
   }
 
-  /// Toggle: a2ui <-> drawio
+  /// Cycle: a2ui -> drawio -> browser -> a2ui
   void toggle() {
-    final newMode = state == CanvasMode.a2ui ? CanvasMode.drawio : CanvasMode.a2ui;
+    final newMode = switch (state) {
+      CanvasMode.a2ui => CanvasMode.drawio,
+      CanvasMode.drawio => CanvasMode.browser,
+      CanvasMode.browser => CanvasMode.a2ui,
+    };
     setMode(newMode);
   }
 

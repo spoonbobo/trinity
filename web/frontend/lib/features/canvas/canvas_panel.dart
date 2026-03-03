@@ -6,9 +6,11 @@ import '../../core/dialog_service.dart';
 import 'canvas_mode_provider.dart';
 import 'a2ui_renderer.dart';
 import 'drawio_renderer.dart';
+import 'browser_renderer.dart';
+import 'browser_provider.dart';
 
-/// Unified canvas panel: A2UI | DrawIO.
-/// Mode toggle and draw.io toolbar fixed at bottom-right.
+/// Unified canvas panel: A2UI | DrawIO | Browser.
+/// Mode toggle and mode-specific toolbars fixed at bottom-right.
 class CanvasPanel extends ConsumerStatefulWidget {
   const CanvasPanel({super.key});
 
@@ -40,6 +42,7 @@ class _CanvasPanelState extends ConsumerState<CanvasPanel> {
                   dialogIsOpen: dialogIsOpen,
                 ),
               ),
+            CanvasMode.browser => const BrowserRenderer(),
           },
         ),
 
@@ -99,6 +102,42 @@ class _CanvasPanelState extends ConsumerState<CanvasPanel> {
                     tokens: t,
                   ),
                 ],
+              ),
+            ),
+          ),
+
+        // Browser toolbar – bottom-right above mode toggle
+        if (mode == CanvasMode.browser)
+          Positioned(
+            bottom: 36,
+            right: 4,
+            child: PointerInterceptor(
+              child: Consumer(
+                builder: (context, ref, _) {
+                  final browserState = ref.watch(browserProvider);
+                  final browserNotifier = ref.read(browserProvider.notifier);
+                  if (browserState.runState != BrowserRunState.running) {
+                    return const SizedBox.shrink();
+                  }
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _SmallButton(
+                        icon: Icons.refresh,
+                        tooltip: 'refresh screenshot',
+                        onTap: () => browserNotifier.manualRefresh(),
+                        tokens: t,
+                      ),
+                      const SizedBox(width: 2),
+                      _SmallButton(
+                        icon: Icons.stop,
+                        tooltip: 'stop browser',
+                        onTap: () => browserNotifier.stopBrowser(),
+                        tokens: t,
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           ),
@@ -187,6 +226,13 @@ class _ModeToggle extends StatelessWidget {
                     ),
                   )
                 : null,
+            tokens: tokens,
+          ),
+          _divider(),
+          _ModeButton(
+            label: 'browser',
+            isSelected: currentMode == CanvasMode.browser,
+            onTap: () => onModeChanged(CanvasMode.browser),
             tokens: tokens,
           ),
         ],

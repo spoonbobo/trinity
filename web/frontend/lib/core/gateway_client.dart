@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:html' as html;
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -63,11 +64,13 @@ class GatewayClient extends ChangeNotifier {
 
   /// Only forward events the shell knows how to handle.
   static const _handledEvents = {
-    'chat', 'agent', 'a2ui', 'canvas',
+    'chat', 'agent', 'a2ui', 'canvas', 'browser',
     'exec.approval.requested', 'tick',
   };
   bool _isHandledEvent(String name) =>
-      _handledEvents.contains(name) || name.startsWith('canvas.');
+      _handledEvents.contains(name) ||
+      name.startsWith('canvas.') ||
+      name.startsWith('browser.');
 
   void _onMessage(dynamic raw) {
     try {
@@ -299,6 +302,163 @@ class GatewayClient extends ChangeNotifier {
     }
     _responseCompleters.clear();
   }
+
+  // ---------------------------------------------------------------------------
+  // Browser control HTTP API
+  // ---------------------------------------------------------------------------
+  // The gateway exposes a loopback browser control API.
+  // In the Trinity Docker stack, nginx proxies /__openclaw__/ to the gateway.
+  // We use the page origin for same-origin requests (goes through nginx),
+  // falling back to deriving from the WebSocket URL for direct connections.
+
+  /// Base URL for browser control HTTP API calls.
+  String get browserBaseUrl => _browserBaseUrl;
+  String get _browserBaseUrl {
+    // Prefer same-origin (works through nginx proxy)
+    final origin = html.window.location.origin;
+    if (origin.isNotEmpty && origin != 'null') return origin;
+    // Fallback: derive from WS URL
+    final wsUri = Uri.parse(url);
+    final scheme = wsUri.scheme == 'wss' ? 'https' : 'http';
+    return '$scheme://${wsUri.host}${wsUri.hasPort ? ':${wsUri.port}' : ''}';
+  }
+
+  /// Auth headers for browser control API calls.
+  Map<String, String> get browserHeaders => _browserHeaders;
+  Map<String, String> get _browserHeaders => {
+    'Authorization': 'Bearer ${auth.token}',
+    'Content-Type': 'application/json',
+  };
+
+  Future<Map<String, dynamic>> browserApiGet(String path, {String profile = 'openclaw'}) async {
+    final separator = path.contains('?') ? '&' : '?';
+    final fullUrl = '$_browserBaseUrl/__openclaw__/browser$path${separator}profile=$profile';
+    final response = await html.HttpRequest.request(
+      fullUrl,
+      method: 'GET',
+      requestHeaders: _browserHeaders,
+    );
+    if (response.status == 200 || response.status == 201) {
+      return jsonDecode(response.responseText ?? '{}') as Map<String, dynamic>;
+    }
+    throw Exception('Browser API GET $path failed: ${response.status} ${response.responseText}');
+  }
+
+  Future<Map<String, dynamic>> browserApiPost(String path, {
+    Map<String, dynamic>? body,
+    String profile = 'openclaw',
+  }) async {
+    final separator = path.contains('?') ? '&' : '?';
+    final fullUrl = '$_browserBaseUrl/__openclaw__/browser$path${separator}profile=$profile';
+    final response = await html.HttpRequest.request(
+      fullUrl,
+      method: 'POST',
+      requestHeaders: _browserHeaders,
+      sendData: body != null ? jsonEncode(body) : null,
+    );
+    if (response.status == 200 || response.status == 201) {
+      final text = response.responseText ?? '{}';
+      if (text.isEmpty) return {};
+      try {
+        return jsonDecode(text) as Map<String, dynamic>;
+      } catch (_) {
+        return {'raw': text};
+      }
+    }
+    throw Exception('Browser API POST $path failed: ${response.status} ${response.responseText}');
+  }
+
+  Future<Map<String, dynamic>> browserApiDelete(String path, {String profile = 'openclaw'}) async {
+    final separator = path.contains('?') ? '&' : '?';
+    final fullUrl = '$_browserBaseUrl/__openclaw__/browser$path${separator}profile=$profile';
+    final response = await html.HttpRequest.request(
+      fullUrl,
+      method: 'DELETE',
+      requestHeaders: _browserHeaders,
+    );
+    if (response.status == 200 || response.status == 201) {
+      final text = response.responseText ?? '{}';
+      if (text.isEmpty) return {};
+      try {
+        return jsonDecode(text) as Map<String, dynamic>;
+      } catch (_) {
+        return {'raw': text};
+      }
+    }
+    throw Exception('Browser API DELETE $path failed: ${response.status} ${response.responseText}');
+  }
+
+  /// Get browser status.
+  Future<Map<String, dynamic>> browserStatus({String profile = 'openclaw'}) =>
+      browserApiGet('/', profile: profile);
+
+  /// Start the managed browser.
+  Future<Map<String, dynamic>> browserStart({String profile = 'openclaw'}) =>
+      browserApiPost('/start', profile: profile);
+
+  /// Stop the managed browser.
+  Future<Map<String, dynamic>> browserStop({String profile = 'openclaw'}) =>
+      browserApiPost('/stop', profile: profile);
+
+  /// List open tabs.
+  Future<Map<String, dynamic>> browserTabs({String profile = 'openclaw'}) =>
+      browserApiGet('/tabs', profile: profile);
+
+  /// Open a new tab with optional URL.
+  Future<Map<String, dynamic>> browserTabOpen(String url, {String profile = 'openclaw'}) =>
+      browserApiPost('/tabs/open', body: {'url': url}, profile: profile);
+
+  /// Focus a specific tab by targetId.
+  Future<Map<String, dynamic>> browserTabFocus(String targetId, {String profile = 'openclaw'}) =>
+      browserApiPost('/tabs/focus', body: {'targetId': targetId}, profile: profile);
+
+  /// Close a tab by targetId.
+  Future<Map<String, dynamic>> browserTabClose(String targetId, {String profile = 'openclaw'}) =>
+      browserApiDelete('/tabs/$targetId', profile: profile);
+
+  /// Take a screenshot (returns base64 PNG in response).
+  Future<Map<String, dynamic>> browserScreenshot({
+    String profile = 'openclaw',
+    bool fullPage = false,
+  }) =>
+      browserApiPost('/screenshot', body: {
+        if (fullPage) 'fullPage': true,
+      }, profile: profile);
+
+  /// Get an interactive ARIA snapshot with refs.
+  Future<Map<String, dynamic>> browserSnapshot({
+    String profile = 'openclaw',
+    bool interactive = true,
+    bool compact = true,
+  }) =>
+      browserApiGet('/snapshot?interactive=$interactive&compact=$compact', profile: profile);
+
+  /// Navigate to a URL.
+  Future<Map<String, dynamic>> browserNavigate(String url, {String profile = 'openclaw'}) =>
+      browserApiPost('/navigate', body: {'url': url}, profile: profile);
+
+  /// Perform a browser action (click, type, press, hover, scroll, etc.).
+  Future<Map<String, dynamic>> browserAct({
+    required String kind,
+    String? ref,
+    String? text,
+    bool? submit,
+    String profile = 'openclaw',
+  }) =>
+      browserApiPost('/act', body: {
+        'kind': kind,
+        if (ref != null) 'ref': ref,
+        if (text != null) 'text': text,
+        if (submit != null) 'submit': submit,
+      }, profile: profile);
+
+  /// Resize the browser viewport.
+  Future<Map<String, dynamic>> browserResize(int width, int height, {String profile = 'openclaw'}) =>
+      browserApiPost('/act', body: {
+        'kind': 'resize',
+        'width': width,
+        'height': height,
+      }, profile: profile);
 
   @override
   void dispose() {

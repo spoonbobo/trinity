@@ -179,6 +179,8 @@ class _ShellPageState extends ConsumerState<ShellPage> {
         CanvasPanel.drawioKey.currentState?.blur();
         return true;
       }
+      // Browser mode: Escape is a no-op at the shell level
+      // (URL bar handles its own Escape)
     }
 
     final isCtrl = HardwareKeyboard.instance.isControlPressed ||
@@ -197,6 +199,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       if (canvasMode == CanvasMode.drawio) {
         CanvasPanel.drawioKey.currentState?.blur();
       }
+      // Browser mode: no iframe to blur
     }
   }
 
@@ -205,6 +208,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     if (canvasMode == CanvasMode.drawio) {
       CanvasPanel.drawioKey.currentState?.blur();
     }
+    // Browser mode: no iframe to blur
   }
 
   final _dialogs = DialogService.instance;

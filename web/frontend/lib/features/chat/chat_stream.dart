@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:html' as html;
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -26,6 +27,9 @@ class ChatEntry {
   final bool isStreaming;
   final DateTime timestamp;
   final List<Map<String, dynamic>>? attachments;
+  final Map<String, dynamic>? metadata; // Parsed tool args (command, path, etc.)
+  final DateTime? startedAt; // When tool call started (for duration tracking)
+  final Duration? elapsed; // How long the tool call took
 
   ChatEntry({
     required this.role,
@@ -34,18 +38,119 @@ class ChatEntry {
     this.toolCallId,
     this.isStreaming = false,
     this.attachments,
+    this.metadata,
+    this.startedAt,
+    this.elapsed,
     DateTime? timestamp,
   }) : timestamp = timestamp ?? DateTime.now();
 
-  ChatEntry copyWith({String? content, bool? isStreaming}) => ChatEntry(
+  ChatEntry copyWith({
+    String? content,
+    bool? isStreaming,
+    Duration? elapsed,
+  }) =>
+      ChatEntry(
         role: role,
         content: content ?? this.content,
         toolName: toolName,
         toolCallId: toolCallId,
         isStreaming: isStreaming ?? this.isStreaming,
         attachments: attachments,
+        metadata: metadata,
+        startedAt: startedAt,
+        elapsed: elapsed ?? this.elapsed,
         timestamp: timestamp,
       );
+
+  /// Try to parse a stringified args blob into structured metadata.
+  /// Returns null if content is empty or not valid JSON.
+  static Map<String, dynamic>? parseToolMetadata(String? toolName, String args) {
+    if (args.isEmpty) return null;
+    try {
+      final parsed = json.decode(args);
+      if (parsed is Map<String, dynamic>) return parsed;
+    } catch (_) {
+      // Not JSON -- try to extract key info from plain text
+    }
+    return null;
+  }
+
+  /// Human-readable summary of tool metadata for display.
+  /// Returns a short description line (e.g. "ls -la" for exec, "src/main.dart" for read).
+  String? get metadataSummary {
+    final m = metadata;
+    if (m == null) return null;
+    final name = toolName ?? '';
+
+    // exec / bash: show command
+    if (name == 'exec' || name == 'bash' || name == 'Bash') {
+      final cmd = m['command'] as String? ?? m['cmd'] as String? ?? '';
+      if (cmd.isNotEmpty) return cmd;
+    }
+
+    // read / write / edit: show file path
+    if (name == 'read' || name == 'Read' || name == 'write' || name == 'Write' ||
+        name == 'edit' || name == 'Edit') {
+      final path = m['filePath'] as String? ?? m['path'] as String? ??
+          m['file'] as String? ?? '';
+      if (path.isNotEmpty) return path;
+    }
+
+    // glob: show pattern
+    if (name == 'glob' || name == 'Glob') {
+      final pattern = m['pattern'] as String? ?? '';
+      if (pattern.isNotEmpty) return pattern;
+    }
+
+    // grep: show pattern + include
+    if (name == 'grep' || name == 'Grep') {
+      final pattern = m['pattern'] as String? ?? '';
+      final include = m['include'] as String? ?? '';
+      if (pattern.isNotEmpty) {
+        return include.isNotEmpty ? '$pattern ($include)' : pattern;
+      }
+    }
+
+    // canvas_ui: just label it
+    if (name == 'canvas_ui') return 'rendering surface';
+
+    // Generic: try common field names
+    final cmd = m['command'] as String? ?? m['description'] as String? ??
+        m['query'] as String? ?? m['prompt'] as String? ?? '';
+    if (cmd.isNotEmpty) return cmd;
+
+    return null;
+  }
+
+  /// Secondary metadata line (workdir, host, path context).
+  String? get metadataDetail {
+    final m = metadata;
+    if (m == null) return null;
+    final parts = <String>[];
+    final name = toolName ?? '';
+
+    if (name == 'exec' || name == 'bash' || name == 'Bash') {
+      final workdir = m['workdir'] as String? ?? m['cwd'] as String? ?? '';
+      if (workdir.isNotEmpty) parts.add(workdir);
+      final host = m['host'] as String? ?? '';
+      if (host.isNotEmpty && host != 'sandbox') parts.add('host:$host');
+    }
+
+    if (name == 'read' || name == 'Read') {
+      final offset = m['offset'];
+      final limit = m['limit'];
+      if (offset != null || limit != null) {
+        parts.add('lines ${offset ?? 1}-${((offset as int?) ?? 1) + ((limit as int?) ?? 2000)}');
+      }
+    }
+
+    if (name == 'grep' || name == 'Grep') {
+      final path = m['path'] as String? ?? '';
+      if (path.isNotEmpty) parts.add(path);
+    }
+
+    return parts.isEmpty ? null : parts.join('  ');
+  }
 }
 
 class ChatStreamView extends ConsumerStatefulWidget {
@@ -154,12 +259,20 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
               if (role == 'assistant' && content.isEmpty) continue;
               // Extract image attachments from history content blocks
               final historyAttachments = _extractImageAttachments(msg['content']);
+              // Try to extract structured metadata from tool entries
+              // History tool entries may include 'args' or 'input' alongside result content
+              Map<String, dynamic>? meta;
+              if (role == 'tool' && toolName != null) {
+                final argsRaw = msg['args']?.toString() ?? msg['input']?.toString() ?? '';
+                meta = ChatEntry.parseToolMetadata(toolName, argsRaw);
+              }
               _entries.add(ChatEntry(
                 role: role,
                 content: content,
                 toolName: toolName,
                 toolCallId: toolCallId,
                 timestamp: timestamp,
+                metadata: meta,
                 attachments: historyAttachments.isNotEmpty ? historyAttachments : null,
               ));
             }
@@ -311,9 +424,13 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
       for (int i = _entries.length - 1; i >= 0; i--) {
         if (_entries[i].role == 'tool' &&
             _entries[i].toolCallId == toolCallId) {
+          final elapsed = _entries[i].startedAt != null
+              ? DateTime.now().difference(_entries[i].startedAt!)
+              : null;
           _entries[i] = _entries[i].copyWith(
             content: content,
             isStreaming: isStreaming,
+            elapsed: elapsed,
           );
           return;
         }
@@ -323,9 +440,13 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
     // Fallback: find the most recent tool entry in the current turn
     for (int i = _entries.length - 1; i >= 0; i--) {
       if (_entries[i].role == 'tool') {
+        final elapsed = _entries[i].startedAt != null
+            ? DateTime.now().difference(_entries[i].startedAt!)
+            : null;
         _entries[i] = _entries[i].copyWith(
           content: content,
           isStreaming: isStreaming,
+          elapsed: elapsed,
         );
         return;
       }
@@ -498,13 +619,17 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
         } else {
           // Tool started or in progress
           final args = dataMap?['args']?.toString() ?? '';
+          final meta = ChatEntry.parseToolMetadata(toolName, args);
           setState(() {
+            _agentThinking = false; // Clear thinking indicator -- tool card replaces it
             _entries.add(ChatEntry(
               role: 'tool',
               content: args,
               toolName: toolName,
               toolCallId: toolCallId,
               isStreaming: true,
+              metadata: meta,
+              startedAt: DateTime.now(),
             ));
           });
         }
@@ -1190,40 +1315,7 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
                         ),
                       ),
                       imageBuilder: (uri, title, alt) {
-                        return ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 400, maxHeight: 300),
-                          child: Image.network(
-                            uri.toString(),
-                            fit: BoxFit.contain,
-                            loadingBuilder: (_, child, progress) {
-                              if (progress == null) return child;
-                              return SizedBox(
-                                height: 80,
-                                child: Center(child: SizedBox(
-                                  width: 60,
-                                  child: LinearProgressIndicator(
-                                    value: progress.expectedTotalBytes != null
-                                      ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
-                                      : null,
-                                    backgroundColor: t.border,
-                                    color: t.accentPrimary,
-                                    minHeight: 2,
-                                  ),
-                                )),
-                              );
-                            },
-                            errorBuilder: (_, __, ___) => Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                borderRadius: kShellBorderRadiusSm,
-                                color: t.surfaceBase,
-                                border: Border.all(color: t.border, width: 0.5),
-                              ),
-                              child: Text('[image failed to load]',
-                                style: TextStyle(fontSize: 11, color: t.fgMuted)),
-                            ),
-                          ),
-                        );
+                        return _ChatImage(url: uri.toString());
                       },
                       onTapLink: (text, href, title) {
                         if (href != null) {
@@ -1354,28 +1446,48 @@ class _ToolCardState extends State<_ToolCard> {
 
   bool _expanded = false;
 
+  /// Format elapsed duration as a compact string (e.g. "1.2s", "350ms").
+  String _formatElapsed(Duration d) {
+    if (d.inMilliseconds < 1000) return '${d.inMilliseconds}ms';
+    final secs = d.inMilliseconds / 1000.0;
+    if (secs < 60) return '${secs.toStringAsFixed(1)}s';
+    final mins = d.inMinutes;
+    final remSecs = (secs - mins * 60).toInt();
+    return '${mins}m ${remSecs}s';
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final t = ShellTokens.of(context);
     final toolName = widget.entry.toolName ?? 'tool';
-    final content = widget.entry.content;
-    final canExpand = content.length > _collapsedLimit;
-    final hardCapped = content.length > _expandedLimit;
+    final summary = widget.entry.metadataSummary;
+    final detail = widget.entry.metadataDetail;
+    final isStreaming = widget.entry.isStreaming;
+    final elapsed = widget.entry.elapsed;
 
-    String displayContent;
-    if (!canExpand) {
-      displayContent = content;
-    } else if (_expanded) {
-      displayContent = hardCapped
-          ? '${content.substring(0, _expandedLimit)}... (truncated)'
-          : content;
-    } else {
-      displayContent = '${content.substring(0, _collapsedLimit)}...';
+    // Result content: only show when tool has completed (not streaming)
+    // and only if there's no structured summary (avoid showing raw args)
+    final rawContent = widget.entry.content;
+    final resultContent = (!isStreaming && summary != null) ? rawContent : rawContent;
+    final showResult = !isStreaming && resultContent.isNotEmpty;
+
+    final canExpand = showResult && resultContent.length > _collapsedLimit;
+    final hardCapped = showResult && resultContent.length > _expandedLimit;
+
+    String displayResult = '';
+    if (showResult) {
+      if (!canExpand) {
+        displayResult = resultContent;
+      } else if (_expanded) {
+        displayResult = hardCapped
+            ? '${resultContent.substring(0, _expandedLimit)}... (truncated)'
+            : resultContent;
+      } else {
+        displayResult = '${resultContent.substring(0, _collapsedLimit)}...';
+      }
     }
 
-    // Only show the toggle when there's content beyond 300 chars to reveal,
-    // but hide "show more" if already expanded and hard-capped (nothing more to do).
     final showToggle = canExpand && !(_expanded && hardCapped);
 
     return Padding(
@@ -1390,9 +1502,10 @@ class _ToolCardState extends State<_ToolCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Header row: [dots] toolName [elapsed]
             Row(
               children: [
-                if (widget.entry.isStreaming) ...[
+                if (isStreaming) ...[
                   SizedBox(
                     width: 12,
                     height: 8,
@@ -1403,41 +1516,103 @@ class _ToolCardState extends State<_ToolCard> {
                 Text(
                   toolName,
                   style: theme.textTheme.labelSmall?.copyWith(
-                    color: widget.entry.isStreaming ? t.accentPrimary : t.fgTertiary,
+                    color: isStreaming ? t.accentPrimary : t.fgTertiary,
                     fontSize: 10,
                     letterSpacing: 0.3,
                   ),
                 ),
+                if (elapsed != null) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    _formatElapsed(elapsed),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: t.fgMuted,
+                      fontSize: 9,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                ],
               ],
             ),
-            if (content.isNotEmpty) ...[
+            // Structured summary line (command, path, pattern)
+            if (summary != null) ...[
+              const SizedBox(height: 3),
+              SelectableText(
+                summary,
+                maxLines: 2,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontSize: 11,
+                  color: isStreaming ? t.fgSecondary : t.fgTertiary,
+                  fontWeight: FontWeight.w500,
+                  height: 1.4,
+                ),
+              ),
+            ],
+            // Detail line (workdir, host, line range)
+            if (detail != null) ...[
+              const SizedBox(height: 1),
+              Text(
+                detail,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontSize: 9,
+                  color: t.fgMuted,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ],
+            // Result content (after completion)
+            if (showResult && summary != null && displayResult.isNotEmpty) ...[
               const SizedBox(height: 4),
               SelectableText(
-                displayContent,
+                displayResult,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   fontSize: 11,
                   color: t.fgTertiary,
                   height: 1.4,
                 ),
               ),
-              if (showToggle)
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: GestureDetector(
-                    onTap: () => setState(() => _expanded = !_expanded),
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      child: Text(
-                        _expanded ? 'show less' : 'show more',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: t.accentPrimary,
-                        ),
+            ] else if (showResult && summary == null && displayResult.isNotEmpty) ...[
+              // No structured metadata -- fall back to raw content display
+              const SizedBox(height: 4),
+              SelectableText(
+                displayResult,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontSize: 11,
+                  color: t.fgTertiary,
+                  height: 1.4,
+                ),
+              ),
+            ] else if (isStreaming && summary == null && rawContent.isNotEmpty) ...[
+              // Streaming with no parsed metadata -- show raw args
+              const SizedBox(height: 4),
+              SelectableText(
+                rawContent.length > _collapsedLimit
+                    ? '${rawContent.substring(0, _collapsedLimit)}...'
+                    : rawContent,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontSize: 11,
+                  color: t.fgTertiary,
+                  height: 1.4,
+                ),
+              ),
+            ],
+            if (showToggle)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: GestureDetector(
+                  onTap: () => setState(() => _expanded = !_expanded),
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: Text(
+                      _expanded ? 'show less' : 'show more',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: t.accentPrimary,
                       ),
                     ),
                   ),
                 ),
-            ],
+              ),
           ],
         ),
       ),
@@ -1463,6 +1638,139 @@ class _SystemMessage extends StatelessWidget {
               ),
           textAlign: TextAlign.center,
         ),
+      ),
+    );
+  }
+}
+
+/// Rendered image in chat with hover-only copy/download toolbar.
+class _ChatImage extends StatefulWidget {
+  final String url;
+  const _ChatImage({required this.url});
+
+  @override
+  State<_ChatImage> createState() => _ChatImageState();
+}
+
+class _ChatImageState extends State<_ChatImage> {
+  bool _hovering = false;
+  bool _copied = false;
+
+  void _downloadImage() {
+    final filename = widget.url.split('/').last.split('?').first;
+    html.AnchorElement(href: widget.url)
+      ..setAttribute('download', filename.isNotEmpty ? filename : 'image.png')
+      ..click();
+  }
+
+  void _copyImageUrl() {
+    Clipboard.setData(ClipboardData(text: widget.url)).then((_) {
+      if (!mounted) return;
+      setState(() => _copied = true);
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) setState(() => _copied = false);
+      });
+    }).catchError((_) {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = ShellTokens.of(context);
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: Stack(
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 400, maxHeight: 300),
+            child: Image.network(
+              widget.url,
+              fit: BoxFit.contain,
+              loadingBuilder: (_, child, progress) {
+                if (progress == null) return child;
+                return SizedBox(
+                  height: 80,
+                  child: Center(child: SizedBox(
+                    width: 60,
+                    child: LinearProgressIndicator(
+                      value: progress.expectedTotalBytes != null
+                        ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
+                        : null,
+                      backgroundColor: t.border,
+                      color: t.accentPrimary,
+                      minHeight: 2,
+                    ),
+                  )),
+                );
+              },
+              errorBuilder: (_, __, ___) => Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  borderRadius: kShellBorderRadiusSm,
+                  color: t.surfaceBase,
+                  border: Border.all(color: t.border, width: 0.5),
+                ),
+                child: Text('[image failed to load]',
+                  style: TextStyle(fontSize: 11, color: t.fgMuted)),
+              ),
+            ),
+          ),
+          if (_hovering)
+            Positioned(
+              top: 4,
+              right: 4,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: t.surfaceBase.withOpacity(0.85),
+                  border: Border.all(color: t.border, width: 0.5),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    GestureDetector(
+                      onTap: _copyImageUrl,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _copied ? Icons.check : Icons.copy,
+                              size: 12,
+                              color: _copied ? t.accentPrimary : t.fgMuted,
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              _copied ? 'copied' : 'copy',
+                              style: TextStyle(fontSize: 10, color: t.fgMuted),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Container(width: 0.5, height: 16, color: t.border),
+                    GestureDetector(
+                      onTap: _downloadImage,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.download, size: 12, color: t.fgMuted),
+                            const SizedBox(width: 3),
+                            Text(
+                              'download',
+                              style: TextStyle(fontSize: 10, color: t.fgMuted),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
