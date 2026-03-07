@@ -296,13 +296,13 @@ data:
           "enabled": true,
           "protocol": "openid-connect",
           "publicClient": false,
-          "secret": "trinity-shell-secret",
+          "secret": "{{ .Values.secrets.keycloakClientSecret }}",
           "standardFlowEnabled": true,
           "directAccessGrantsEnabled": false,
-          "redirectUris": ["http://localhost/*", "http://localhost:80/*"],
-          "webOrigins": ["http://localhost"],
+          "redirectUris": ["http://localhost/*", "http://localhost:80/*", "http://localhost:8080/*", "{{ .Values.urls.apiExternalUrl }}/*"],
+          "webOrigins": ["http://localhost", "http://localhost:8080", "{{ .Values.urls.apiExternalUrl }}"],
           "attributes": {
-            "post.logout.redirect.uris": "http://localhost/*"
+            "post.logout.redirect.uris": "http://localhost/*##http://localhost:8080/*##{{ .Values.urls.apiExternalUrl }}/*"
           }
         },
         {
@@ -313,7 +313,7 @@ data:
           "standardFlowEnabled": true,
           "directAccessGrantsEnabled": false,
           "redirectUris": ["/realms/trinity/account/*"],
-          "webOrigins": ["http://localhost"]
+          "webOrigins": ["http://localhost", "http://localhost:8080", "{{ .Values.urls.apiExternalUrl }}"]
         }
       ],
       "roles": {

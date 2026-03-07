@@ -6,11 +6,11 @@ Deploy the canvas-bridge extension and AGENTS.md to the running OpenClaw contain
 
 Step 1 - Copy canvas-bridge extension:
 
-!`docker cp web/extensions/canvas-bridge/index.ts trinity-openclaw:/home/node/.openclaw/extensions/canvas-bridge/index.ts`
+!`docker cp app/extensions/canvas-bridge/index.ts trinity-openclaw:/home/node/.openclaw/extensions/canvas-bridge/index.ts`
 
 Step 2 - Copy AGENTS.md:
 
-!`docker cp web/AGENTS.md trinity-openclaw:/home/node/.openclaw/workspace/AGENTS.md`
+!`docker cp app/AGENTS.md trinity-openclaw:/home/node/.openclaw/workspace/AGENTS.md`
 
 Step 3 - Restart gateway to reload:
 

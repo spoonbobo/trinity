@@ -17,12 +17,12 @@ Use that file to discover all available doc pages before exploring further.
 
 ## Running Stack (Docker)
 
-The Trinity stack runs via Docker Compose from `web/docker-compose.yml`:
+The Trinity stack runs via Docker Compose from `app/docker-compose.yml`:
 
 ```
-docker compose -f web/docker-compose.yml up -d          # start
-docker compose -f web/docker-compose.yml down            # stop
-docker compose -f web/docker-compose.yml logs -f         # follow logs
+docker compose -f app/docker-compose.yml up -d          # start
+docker compose -f app/docker-compose.yml down            # stop
+docker compose -f app/docker-compose.yml logs -f         # follow logs
 docker restart trinity-openclaw                          # restart gateway only
 ```
 
@@ -55,7 +55,7 @@ docker exec trinity-openclaw openclaw logs --tail 50      # recent logs
 docker exec -it trinity-openclaw openclaw channels login # login
 ```
 
-The gateway token is stored in `web/.env` as `OPENCLAW_GATEWAY_TOKEN`.
+The gateway token is stored in `app/.env` as `OPENCLAW_GATEWAY_TOKEN`.
 
 ## openclaw-exec Tool (OpenCode MCP)
 
@@ -129,7 +129,7 @@ openclaw models scan --set-image         # scan and set first image selection
 
 ## Configuration
 
-Config lives at `web/openclaw.json` (mounted read-only into the container at `~/.openclaw/openclaw.json`).
+Config lives at `app/openclaw.json` (mounted read-only into the container at `~/.openclaw/openclaw.json`).
 
 Format is JSON5 (comments + trailing commas allowed). All fields are optional — OpenClaw uses safe defaults when omitted.
 
@@ -137,7 +137,7 @@ The live config is inside the Docker volume at `/home/node/.openclaw/openclaw.js
 
 **Important notes from setup:**
 
-- The config file is NOT bind-mounted (atomic rename fails on Windows Docker bind mounts). It lives in the `openclaw-data` volume. To sync it back to the host: `docker cp trinity-openclaw:/home/node/.openclaw/openclaw.json web/openclaw.json`
+- The config file is NOT bind-mounted (atomic rename fails on Windows Docker bind mounts). It lives in the `openclaw-data` volume. To sync it back to the host: `docker cp trinity-openclaw:/home/node/.openclaw/openclaw.json app/openclaw.json`
 - `agents.defaults.sandbox.mode` must be `"off"` (not `"non-main"`) because Docker CLI is not available inside the gateway container. Setting it to `"non-main"` causes `spawn docker ENOENT` errors when handling WhatsApp or non-main sessions.
 - The onboarding wizard (`openclaw onboard`) may overwrite `gateway.bind` back to `"loopback"` and inject its own token into the config. Always verify after running the wizard.
 - The Flutter frontend needs the gateway token at build time via `--dart-define=GATEWAY_TOKEN=...`. The docker-compose passes `OPENCLAW_GATEWAY_TOKEN` from `.env` as a build arg.
@@ -248,7 +248,7 @@ docker logs trinity-openclaw --tail 30
 docker exec trinity-openclaw openclaw doctor --fix
 ```
 
-**Config validation errors:** check `web/openclaw.json` syntax. The config is JSON5 but must pass OpenClaw's schema validation.
+**Config validation errors:** check `app/openclaw.json` syntax. The config is JSON5 but must pass OpenClaw's schema validation.
 
 **"unauthorized" / "token mismatch":** the dashboard needs the gateway token. Get the authenticated URL:
 ```
@@ -261,10 +261,10 @@ CRITICAL: `run --rm frontend-builder` alone does NOT rebuild the image — it re
 
 ```bash
 # 1. Rebuild image (--no-cache busts Docker layer cache — REQUIRED for source changes)
-docker compose -f web/docker-compose.yml --profile build build --no-cache frontend-builder
+docker compose -f app/docker-compose.yml --profile build build --no-cache frontend-builder
 
 # 2. Run builder to copy output to volume
-docker compose -f web/docker-compose.yml --profile build run --rm frontend-builder
+docker compose -f app/docker-compose.yml --profile build run --rm frontend-builder
 
 # 3. Restart nginx to serve new build
 docker restart trinity-nginx
@@ -275,8 +275,8 @@ docker restart trinity-nginx
 **Deploy extension or AGENTS.md changes (no rebuild needed):**
 
 ```bash
-docker cp web/extensions/canvas-bridge/index.ts trinity-openclaw:/home/node/.openclaw/extensions/canvas-bridge/index.ts
-docker cp web/AGENTS.md trinity-openclaw:/home/node/.openclaw/workspace/AGENTS.md
+docker cp app/extensions/canvas-bridge/index.ts trinity-openclaw:/home/node/.openclaw/extensions/canvas-bridge/index.ts
+docker cp app/AGENTS.md trinity-openclaw:/home/node/.openclaw/workspace/AGENTS.md
 docker restart trinity-openclaw
 ```
 
@@ -284,6 +284,6 @@ Note: AGENTS.md changes only take effect on new sessions. Clear the webchat sess
 
 **Update OpenClaw to latest:**
 ```
-docker compose -f web/docker-compose.yml build --no-cache openclaw-gateway
-docker compose -f web/docker-compose.yml up -d
+docker compose -f app/docker-compose.yml build --no-cache openclaw-gateway
+docker compose -f app/docker-compose.yml up -d
 ```

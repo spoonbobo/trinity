@@ -8,10 +8,10 @@ Check terminal-proxy is running and RBAC is loaded:
 
 Test the RBAC registry by running the test suite:
 
-!`cd web/terminal-proxy && npx jest rbac-registry.test.js --no-cache 2>&1`
+!`cd app/terminal-proxy && npx jest rbac-registry.test.js --no-cache 2>&1`
 
 Check the auth-service RBAC registry tests too:
 
-!`cd web/auth-service && npx jest rbac-registry.test.js --no-cache 2>&1`
+!`cd app/auth-service && npx jest rbac-registry.test.js --no-cache 2>&1`
 
 Report test results. If any tests fail, identify the failing assertions and suggest fixes.

@@ -6,7 +6,7 @@ Trinity AGI is a "featureless" Universal Command Center. It is a host, not an ap
 
 ## Repository Structure
 
-- **`web/`** — The command center application (Flutter frontend, backend services, Dockerfiles).
+- **`app/`** — The command center application (Flutter frontend, backend services, Dockerfiles).
 - **`k8s/`** — Helm charts for Kubernetes deployment (`trinity-platform` shared services + `openclaw-instance` per-user pods).
 - **`site/`** — The public marketing website (Next.js, Tailwind CSS, dark theme).
 
@@ -29,7 +29,7 @@ Infrastructure is managed via Helm on Kubernetes. See the `k8s-deploy` skill for
 - **Local dev**: minikube with `values.dev.yaml`
 - **Production**: any K8s cluster with `values.prod.yaml`
 - **Images**: pushed to `ghcr.io/spoonbobo/trinity-agi/`
-- **Docker Compose** (`web/docker-compose.yml`): legacy single-tenant mode, deprecated.
+- **Docker Compose** (`app/docker-compose.yml`): legacy single-tenant mode, deprecated.
 
 ## Communication Protocol
 

@@ -48,7 +48,7 @@ The `keycloak-adfs-bootstrap` Job runs as a post-install/post-upgrade hook and c
 
 ## Enable (Docker Compose)
 
-Set these env vars in `web/.env`:
+Set these env vars in `app/.env`:
 
 ```env
 ADFS_ENABLED=true
@@ -63,7 +63,7 @@ ADFS_DEFAULT_ROLE=trinity_user
 Then restart:
 
 ```bash
-docker compose -f web/docker-compose.yml up -d --build keycloak
+docker compose -f app/docker-compose.yml up -d --build keycloak
 # Run the bootstrap script manually:
 docker exec trinity-keycloak /bin/sh /opt/keycloak/data/import/configure-adfs-idp.sh
 ```

@@ -79,7 +79,7 @@ spec:
                   name: trinity-secrets
                   key: KEYCLOAK_CLIENT_SECRET
             - name: GOTRUE_EXTERNAL_KEYCLOAK_URL
-              value: "http://keycloak:8080/realms/trinity"
+              value: "http://keycloak:8080/keycloak/realms/trinity"
             - name: GOTRUE_EXTERNAL_KEYCLOAK_REDIRECT_URI
               value: "{{ .Values.urls.apiExternalUrl }}/supabase/auth/v1/callback"
           livenessProbe:

@@ -8,57 +8,57 @@
 
 ## Project layout
 
-- `web/frontend/` -- Flutter web shell (Dart)
-- `web/nginx/` -- Reverse proxy config
-- `web/terminal-proxy/` -- WebSocket terminal proxy (Node.js)
-- `web/scripts/` -- Bootstrap and test scripts
-- `web/skills/` -- Bundled agent skills
-- `web/cron-templates/` -- Bundled cron templates
+- `app/frontend/` -- Flutter web shell (Dart)
+- `app/nginx/` -- Reverse proxy config
+- `app/terminal-proxy/` -- WebSocket terminal proxy (Node.js)
+- `app/scripts/` -- Bootstrap and test scripts
+- `app/skills/` -- Bundled agent skills
+- `app/cron-templates/` -- Bundled cron templates
 - `site/` -- Marketing website (Next.js)
 
 ## Development workflow
 
 ### Frontend (Flutter)
 
-The frontend lives in `web/frontend/`. After making changes:
+The frontend lives in `app/frontend/`. After making changes:
 
 ```bash
 # Rebuild the image (no cache to pick up all changes)
-docker compose -f web/docker-compose.yml --profile build build --no-cache frontend-builder
+docker compose -f app/docker-compose.yml --profile build build --no-cache frontend-builder
 
 # Copy built assets to the shared volume
-docker compose -f web/docker-compose.yml --profile build run --rm frontend-builder
+docker compose -f app/docker-compose.yml --profile build run --rm frontend-builder
 
 # Restart nginx to serve the new build
-docker compose -f web/docker-compose.yml restart nginx
+docker compose -f app/docker-compose.yml restart nginx
 ```
 
 Hard-refresh your browser (Ctrl+Shift+R) to bypass cache.
 
 ### Nginx config
 
-Edit `web/nginx/nginx.conf`, then:
+Edit `app/nginx/nginx.conf`, then:
 
 ```bash
-docker compose -f web/docker-compose.yml restart nginx
+docker compose -f app/docker-compose.yml restart nginx
 ```
 
 ### Terminal proxy
 
-Edit files in `web/terminal-proxy/`, then:
+Edit files in `app/terminal-proxy/`, then:
 
 ```bash
-docker compose -f web/docker-compose.yml build terminal-proxy
-docker compose -f web/docker-compose.yml up -d terminal-proxy
+docker compose -f app/docker-compose.yml build terminal-proxy
+docker compose -f app/docker-compose.yml up -d terminal-proxy
 ```
 
 ### OpenClaw gateway
 
-The gateway image is built from `web/Dockerfile.openclaw`. To rebuild:
+The gateway image is built from `app/Dockerfile.openclaw`. To rebuild:
 
 ```bash
-docker compose -f web/docker-compose.yml build openclaw-gateway
-docker compose -f web/docker-compose.yml up -d openclaw-gateway
+docker compose -f app/docker-compose.yml build openclaw-gateway
+docker compose -f app/docker-compose.yml up -d openclaw-gateway
 ```
 
 ## Submitting changes

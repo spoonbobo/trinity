@@ -12,7 +12,7 @@ metadata:
 
 Multi-tenant Kubernetes deployment for Trinity AGI. Each user gets an isolated OpenClaw gateway pod with its own state, sessions, and workspace. Shared platform services (DB, auth, Keycloak, Vault, monitoring) run once; per-user OpenClaw instances are provisioned on-demand by the gateway-orchestrator.
 
-Source: `k8s/charts/`, `web/gateway-orchestrator/`, `web/gateway-proxy/`, `web/docker-compose.yml` (legacy, deprecated)
+Source: `k8s/charts/`, `app/gateway-orchestrator/`, `app/gateway-proxy/`, `app/docker-compose.yml` (legacy, deprecated)
 
 ## Architecture
 
@@ -162,7 +162,7 @@ Images are pushed to `ghcr.io/spoonbobo/trinity-agi/`. Auth:
 echo $GHCR_TOKEN | docker login ghcr.io -u spoonbobo --password-stdin
 ```
 
-`GHCR_TOKEN` is stored in `web/.env` (gitignored).
+`GHCR_TOKEN` is stored in `app/.env` (gitignored).
 
 ### Build all images
 
@@ -173,12 +173,12 @@ eval $(minikube docker-env)
 # Or build and push to GHCR (for production):
 REGISTRY=ghcr.io/spoonbobo/trinity-agi
 
-docker build -t $REGISTRY/openclaw:latest -f web/Dockerfile.openclaw web/
-docker build -t $REGISTRY/auth-service:latest web/auth-service/
-docker build -t $REGISTRY/terminal-proxy:latest web/terminal-proxy/
-docker build -t $REGISTRY/gateway-orchestrator:latest web/gateway-orchestrator/
-docker build -t $REGISTRY/gateway-proxy:latest web/gateway-proxy/
-docker build -t $REGISTRY/frontend:latest web/frontend/
+docker build -t $REGISTRY/openclaw:latest -f app/Dockerfile.openclaw app/
+docker build -t $REGISTRY/auth-service:latest app/auth-service/
+docker build -t $REGISTRY/terminal-proxy:latest app/terminal-proxy/
+docker build -t $REGISTRY/gateway-orchestrator:latest app/gateway-orchestrator/
+docker build -t $REGISTRY/gateway-proxy:latest app/gateway-proxy/
+docker build -t $REGISTRY/frontend:latest app/frontend/
 docker build -t $REGISTRY/site:latest site/
 
 # Push
@@ -195,12 +195,12 @@ minikube start --memory 16384 --cpus 4 --driver=docker
 
 # 2. Build images inside minikube
 eval $(minikube docker-env)
-docker build -t openclaw:local -f web/Dockerfile.openclaw web/
-docker build -t trinity-auth-service:latest web/auth-service/
-docker build -t trinity-terminal-proxy:latest web/terminal-proxy/
-docker build -t trinity-gateway-orchestrator:latest web/gateway-orchestrator/
-docker build -t trinity-gateway-proxy:latest web/gateway-proxy/
-docker build -t trinity-frontend:latest web/frontend/
+docker build -t openclaw:local -f app/Dockerfile.openclaw app/
+docker build -t trinity-auth-service:latest app/auth-service/
+docker build -t trinity-terminal-proxy:latest app/terminal-proxy/
+docker build -t trinity-gateway-orchestrator:latest app/gateway-orchestrator/
+docker build -t trinity-gateway-proxy:latest app/gateway-proxy/
+docker build -t trinity-frontend:latest app/frontend/
 docker build -t trinity-site:latest site/
 
 # 3. Install Vault + Vault Agent Injector
@@ -255,7 +255,7 @@ Single PostgreSQL instance (`supabase-db`), multi-schema:
 | `auth` | GoTrue/supabase-auth | users, sessions, refresh_tokens, etc. |
 | `keycloak` | Keycloak | realm config, IdP state, etc. |
 
-Migrations: `web/supabase/migrations/001-005*.sql` (run on first DB start)
+Migrations: `app/supabase/migrations/001-005*.sql` (run on first DB start)
 
 ## Per-User Pod Lifecycle
 

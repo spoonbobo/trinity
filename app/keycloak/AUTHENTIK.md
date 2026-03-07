@@ -4,7 +4,7 @@ This stack is wired so Keycloak can broker your company Authentik IdP.
 
 ## Enable
 
-Set these env vars (in `web/.env` or your deployment environment):
+Set these env vars (in `app/.env` or your deployment environment):
 
 ```env
 AUTHENTIK_ENABLED=true
@@ -21,7 +21,7 @@ AUTHENTIK_DEFAULT_GROUP_VALUE=trinity_user
 Then restart:
 
 ```bash
-docker compose -f web/docker-compose.yml up -d --build keycloak keycloak-idp-bootstrap supabase-auth
+docker compose -f app/docker-compose.yml up -d --build keycloak keycloak-idp-bootstrap supabase-auth
 ```
 
 ## How it works

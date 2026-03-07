@@ -12,7 +12,7 @@ metadata:
 
 The Flutter Web Shell is the frontend for Trinity AGI. It is an intentionally "empty" command center -- no static features, no predefined dashboards. The agent and user build functionality together at runtime via A2UI surfaces and chat.
 
-Source: `web/frontend/`
+Source: `app/frontend/`
 
 ## Architecture
 
@@ -65,7 +65,7 @@ The `admin` toggle is permission-gated: visible only when `authState.hasPermissi
 ## Project Structure
 
 ```
-web/frontend/lib/
+app/frontend/lib/
   main.dart                              -- App entry, re-exports authClientProvider
   core/
     providers.dart                       -- ALL Riverpod providers (auth, gateway, terminal)
@@ -142,8 +142,8 @@ Access: `ShellTokens.of(context)` via ThemeExtension.
 **CRITICAL: `run --rm frontend-builder` does NOT rebuild the image.** You MUST rebuild first:
 
 ```bash
-docker compose -f web/docker-compose.yml --profile build build --no-cache frontend-builder
-docker compose -f web/docker-compose.yml --profile build run --rm frontend-builder
+docker compose -f app/docker-compose.yml --profile build build --no-cache frontend-builder
+docker compose -f app/docker-compose.yml --profile build run --rm frontend-builder
 docker restart trinity-nginx
 ```
 

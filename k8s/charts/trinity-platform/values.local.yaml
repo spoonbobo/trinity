@@ -1,0 +1,141 @@
+# Local minikube overlay -- minimal resources, dev secrets, single replicas
+global:
+  namespace: trinity-local
+  imagePullPolicy: IfNotPresent
+  storageClass: standard
+
+secrets:
+  supabaseJwtSecret: "local-dev-jwt-secret-at-least-32-chars-long!!"
+  supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJpYXQiOjE3MDk0MDAwMDAsImV4cCI6MTg2NzA4MDAwMH0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE"
+  supabasePostgresPassword: "local-pg-password-123"
+  keycloakAdminPassword: "local-kc-admin-123"
+  keycloakClientSecret: "local-kc-client-secret-123"
+  grafanaPassword: "local-grafana-123"
+  vaultToken: "root"
+  orchestratorServiceToken: "local-orchestrator-token-123"
+
+urls:
+  apiExternalUrl: "http://localhost:8080"
+  siteUrl: "http://localhost:8080"
+  allowedOrigins: "http://localhost:8080,http://trinity.local"
+
+superadmin:
+  enabled: true
+  email: "admin@trinity.local"
+  password: "admin123"
+
+vault:
+  devMode: true
+  storage: 1Gi
+  resources:
+    limits:
+      memory: 512Mi
+    requests:
+      memory: 256Mi
+      cpu: 50m
+
+supabaseDb:
+  storage: 2Gi
+  resources:
+    limits:
+      memory: 512Mi
+    requests:
+      memory: 256Mi
+      cpu: 100m
+
+supabaseAuth:
+  resources:
+    limits:
+      memory: 128Mi
+    requests:
+      memory: 64Mi
+      cpu: 50m
+
+keycloak:
+  resources:
+    limits:
+      memory: 512Mi
+    requests:
+      memory: 256Mi
+      cpu: 100m
+
+authService:
+  resources:
+    limits:
+      memory: 128Mi
+    requests:
+      memory: 64Mi
+      cpu: 50m
+
+gatewayOrchestrator:
+  replicas: 1
+  resources:
+    limits:
+      memory: 128Mi
+    requests:
+      memory: 64Mi
+      cpu: 50m
+
+gatewayProxy:
+  replicas: 1
+  resources:
+    limits:
+      memory: 128Mi
+    requests:
+      memory: 64Mi
+      cpu: 50m
+
+terminalProxy:
+  resources:
+    limits:
+      memory: 128Mi
+    requests:
+      memory: 64Mi
+      cpu: 50m
+
+ingress:
+  enabled: true
+  className: nginx
+  host: trinity.local
+
+nginx:
+  enabled: true
+  replicas: 1
+  resources:
+    limits:
+      memory: 64Mi
+    requests:
+      memory: 32Mi
+      cpu: 25m
+
+loki:
+  enabled: true
+  storage: 1Gi
+  resources:
+    limits:
+      memory: 256Mi
+    requests:
+      memory: 128Mi
+      cpu: 50m
+
+grafana:
+  enabled: true
+  storage: 1Gi
+  resources:
+    limits:
+      memory: 128Mi
+    requests:
+      memory: 64Mi
+      cpu: 50m
+
+site:
+  enabled: false
+
+fluentd:
+  enabled: true
+  resources:
+    limits:
+      memory: 128Mi
+    requests:
+      memory: 64Mi
+      cpu: 25m

@@ -12,7 +12,7 @@ metadata:
 
 The auth-service and RBAC system that powers Trinity AGI's access control. Covers the PostgreSQL schema, role hierarchy, permission enforcement, JWT authentication flow, audit logging, and API endpoints.
 
-Source: `web/auth-service/`, `web/supabase/migrations/`, `web/rbac/`
+Source: `app/auth-service/`, `app/supabase/migrations/`, `app/rbac/`
 
 ## Architecture Overview
 
@@ -69,7 +69,7 @@ The recursive CTE walks UP the parent chain. Admin inherits user + guest = 22 to
 | `003_seed_permissions.sql` | Seeds 22 permissions + role-permission bindings |
 | `004_seed_default_admin.sql` | Documentation: admin created via GoTrue at bootstrap |
 
-## Auth Service (`web/auth-service/`)
+## Auth Service (`app/auth-service/`)
 
 Stack: Express.js, jsonwebtoken, pg, js-yaml
 
@@ -114,9 +114,9 @@ Stack: Express.js, jsonwebtoken, pg, js-yaml
 
 Automatically logged: `login.success`, `login.failed`, `permission.denied`, `auth.session.create`, `users.role.assign`, `role.assigned`, `role.ensured`, `permissions.updated`
 
-## YAML Registry (`web/rbac/permissions.yaml`)
+## YAML Registry (`app/rbac/permissions.yaml`)
 
-Three identical copies at: `web/rbac/`, `web/auth-service/rbac/`, `web/terminal-proxy/rbac/`
+Three identical copies at: `app/rbac/`, `app/auth-service/rbac/`, `app/terminal-proxy/rbac/`
 
 The YAML is the declarative specification. The DB is the runtime store. They encode the same information in different formats:
 - YAML `tier` field = which role gets this permission (denormalized)
@@ -159,9 +159,9 @@ On auth-service startup (`ensureDefaultSuperadmin()`):
 ## Common Tasks
 
 **Add a new permission:**
-1. Add to `web/supabase/migrations/003_seed_permissions.sql`
-2. Add to `web/rbac/permissions.yaml` (all 3 copies)
-3. Add to `web/frontend/lib/core/rbac_constants.dart`
+1. Add to `app/supabase/migrations/003_seed_permissions.sql`
+2. Add to `app/rbac/permissions.yaml` (all 3 copies)
+3. Add to `app/frontend/lib/core/rbac_constants.dart`
 4. Assign to a role in the migration + YAML
 5. Run migration or use admin UI matrix editor
 

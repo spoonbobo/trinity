@@ -524,10 +524,10 @@ Grafana dashboard "Trinity AGI - RBAC Security" tracks: login rate, failed login
 
 ```bash
 # 1. Rebuild image (REQUIRED -- no-cache busts Docker layer cache)
-docker compose -f web/docker-compose.yml --profile build build --no-cache frontend-builder
+docker compose -f app/docker-compose.yml --profile build build --no-cache frontend-builder
 
 # 2. Copy build output to volume
-docker compose -f web/docker-compose.yml --profile build run --rm frontend-builder
+docker compose -f app/docker-compose.yml --profile build run --rm frontend-builder
 
 # 3. Restart nginx
 docker restart trinity-nginx
@@ -536,25 +536,25 @@ docker restart trinity-nginx
 ### Backend service rebuild (after JS/YAML changes)
 
 ```bash
-docker compose -f web/docker-compose.yml build --no-cache terminal-proxy auth-service
-docker compose -f web/docker-compose.yml up -d terminal-proxy auth-service
+docker compose -f app/docker-compose.yml build --no-cache terminal-proxy auth-service
+docker compose -f app/docker-compose.yml up -d terminal-proxy auth-service
 ```
 
 ### Extension / AGENTS.md updates (no rebuild needed)
 
 ```bash
-docker cp web/extensions/canvas-bridge/index.ts trinity-openclaw:/home/node/.openclaw/extensions/canvas-bridge/index.ts
-docker cp web/AGENTS.md trinity-openclaw:/home/node/.openclaw/workspace/AGENTS.md
+docker cp app/extensions/canvas-bridge/index.ts trinity-openclaw:/home/node/.openclaw/extensions/canvas-bridge/index.ts
+docker cp app/AGENTS.md trinity-openclaw:/home/node/.openclaw/workspace/AGENTS.md
 docker restart trinity-openclaw
 ```
 
 ### Full deploy checklist
 
 ```bash
-docker compose -f web/docker-compose.yml --profile build build --no-cache frontend-builder
-docker compose -f web/docker-compose.yml --profile build run --rm frontend-builder
-docker compose -f web/docker-compose.yml build --no-cache terminal-proxy auth-service
-docker compose -f web/docker-compose.yml up -d terminal-proxy auth-service
+docker compose -f app/docker-compose.yml --profile build build --no-cache frontend-builder
+docker compose -f app/docker-compose.yml --profile build run --rm frontend-builder
+docker compose -f app/docker-compose.yml build --no-cache terminal-proxy auth-service
+docker compose -f app/docker-compose.yml up -d terminal-proxy auth-service
 docker restart trinity-nginx trinity-openclaw
 ```
 
