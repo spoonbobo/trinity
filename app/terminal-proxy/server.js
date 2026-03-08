@@ -8,6 +8,7 @@ const fs = require('fs');
 const Docker = require('dockerode');
 const { spawn } = require('child_process');
 const path = require('path');
+const pty = require('node-pty');
 const { getRoleTier, isCommandAllowedForTier, getAllowedCommands, getInteractiveCommands } = require('./rbac-registry');
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
@@ -35,6 +36,9 @@ const ENV_BLOCKLIST = new Set([
   'OPENCLAW_CONTAINER_NAME', 'ALLOWED_ORIGINS', 'SUPABASE_JWT_SECRET',
   'EXEC_MODE', 'ORCHESTRATOR_URL', 'ORCHESTRATOR_SERVICE_TOKEN', 'NAMESPACE',
 ]);
+
+// ── Interactive PTY shell session settings ──────────────────────────────
+const SHELL_IDLE_TIMEOUT = parseInt(process.env.SHELL_IDLE_TIMEOUT_MS, 10) || 30 * 60 * 1000; // 30 min
 
 // envOverrides is now keyed by scope: { "_global": {...}, "oc:<id>": {...} }
 // Docker mode uses "_global". Kubectl mode uses "oc:<openclawId>" with "_global" as fallback.
@@ -526,6 +530,31 @@ wss.on('connection', (ws, req) => {
   let openclawId = null;  // Set from auth handshake (per-claw routing)
   let resolvedPod = null;  // Cached pod info for kubectl mode
 
+  // Interactive PTY shell session state
+  let shellProcess = null;
+  let shellIdleTimer = null;
+
+  function resetShellIdleTimer() {
+    if (shellIdleTimer) clearTimeout(shellIdleTimer);
+    if (!shellProcess) return;
+    shellIdleTimer = setTimeout(() => {
+      if (shellProcess) {
+        log('info', 'Shell idle timeout, killing PTY', { userId });
+        try { shellProcess.kill(); } catch (_) {}
+        shellProcess = null;
+        safeSend(ws, { type: 'shell_closed', code: -1, message: 'Idle timeout' });
+      }
+    }, SHELL_IDLE_TIMEOUT);
+  }
+
+  function cleanupShell() {
+    if (shellIdleTimer) { clearTimeout(shellIdleTimer); shellIdleTimer = null; }
+    if (shellProcess) {
+      try { shellProcess.kill(); } catch (_) {}
+      shellProcess = null;
+    }
+  }
+
   // Rate limiting state
   let msgTimestamps = [];
 
@@ -936,6 +965,93 @@ wss.on('connection', (ws, req) => {
           break;
         }
 
+        // ── Interactive PTY shell session (superadmin only) ──────────
+        case 'shell_start': {
+          if (!authenticated) {
+            safeSend(ws, { type: 'error', message: 'Not authenticated' });
+            break;
+          }
+          if (userRole !== 'superadmin') {
+            safeSend(ws, { type: 'error', message: 'Permission denied: interactive shell requires superadmin' });
+            break;
+          }
+          if (shellProcess) {
+            safeSend(ws, { type: 'error', message: 'Shell session already active' });
+            break;
+          }
+
+          const cols = Math.min(Math.max(parseInt(data.cols, 10) || 80, 10), 500);
+          const rows = Math.min(Math.max(parseInt(data.rows, 10) || 24, 2), 200);
+
+          try {
+            let shellBin, shellArgs;
+            if (EXEC_MODE === 'kubectl' && resolvedPod && resolvedPod.podName) {
+              shellBin = 'kubectl';
+              shellArgs = ['exec', '-it', resolvedPod.podName, '-n', K8S_NAMESPACE, '--', '/bin/sh'];
+            } else {
+              shellBin = 'docker';
+              shellArgs = ['exec', '-it', OPENCLAW_CONTAINER, '/bin/sh'];
+            }
+
+            shellProcess = pty.spawn(shellBin, shellArgs, {
+              name: 'xterm-256color',
+              cols,
+              rows,
+              cwd: process.cwd(),
+              env: { ...process.env, OPENCLAW_GATEWAY_TOKEN: (resolvedPod && resolvedPod.token) || GATEWAY_TOKEN },
+            });
+
+            log('info', 'Shell session started', { userId, userRole, pid: shellProcess.pid, action: 'shell.start' });
+
+            shellProcess.onData((output) => {
+              safeSend(ws, { type: 'shell_output', data: output });
+            });
+
+            shellProcess.onExit(({ exitCode }) => {
+              log('info', 'Shell session exited', { userId, exitCode, action: 'shell.exit' });
+              safeSend(ws, { type: 'shell_closed', code: exitCode });
+              cleanupShell();
+            });
+
+            resetShellIdleTimer();
+            safeSend(ws, { type: 'shell_started' });
+          } catch (err) {
+            log('error', 'Failed to start shell', { error: err.message });
+            safeSend(ws, { type: 'error', message: `Failed to start shell: ${err.message}` });
+            shellProcess = null;
+          }
+          break;
+        }
+
+        case 'shell_input': {
+          if (!shellProcess) {
+            safeSend(ws, { type: 'error', message: 'No active shell session' });
+            break;
+          }
+          if (typeof data.data === 'string') {
+            shellProcess.write(data.data);
+            resetShellIdleTimer();
+          }
+          break;
+        }
+
+        case 'shell_resize': {
+          if (!shellProcess) break;
+          const newCols = Math.min(Math.max(parseInt(data.cols, 10) || 80, 10), 500);
+          const newRows = Math.min(Math.max(parseInt(data.rows, 10) || 24, 2), 200);
+          shellProcess.resize(newCols, newRows);
+          break;
+        }
+
+        case 'shell_close': {
+          if (shellProcess) {
+            log('info', 'Shell session closed by client', { userId, action: 'shell.close' });
+            cleanupShell();
+            safeSend(ws, { type: 'shell_closed', code: 0, message: 'Shell closed' });
+          }
+          break;
+        }
+
         case 'ping':
           safeSend(ws, { type: 'pong' });
           break;
@@ -955,6 +1071,7 @@ wss.on('connection', (ws, req) => {
       try { currentProcess.kill('SIGKILL'); } catch (_) {}
       currentProcess = null;
     }
+    cleanupShell();
   });
 
   ws.on('error', (err) => {

@@ -63,6 +63,11 @@ class TerminalProxyClient extends ChangeNotifier {
   Completer<void>? _envDeleteCompleter;
   Completer<EnvSyncResult>? _envSyncCompleter;
 
+  /// Interactive PTY shell session state.
+  bool _isShellActive = false;
+  final StreamController<String> _shellOutputController =
+      StreamController<String>.broadcast();
+
   /// Command queue: each entry is a Future that completes when the previous
   /// command finishes. This ensures only one command runs at a time even when
   /// multiple callers invoke executeCommandForOutput concurrently.
@@ -73,6 +78,9 @@ class TerminalProxyClient extends ChangeNotifier {
   bool get isAuthenticated => _isAuthenticated;
   bool get isExecuting => _isExecuting;
   bool get isConnected => _state == TerminalConnectionState.connected;
+  String? get openclawId => _openclawId;
+  bool get isShellActive => _isShellActive;
+  Stream<String> get shellOutput => _shellOutputController.stream;
 
   TerminalProxyClient({
     required this.url,
@@ -280,10 +288,26 @@ class TerminalProxyClient extends ChangeNotifier {
             if (data['status'] == 'ok') {
               _envSyncCompleter!.complete(result);
             } else {
-              // Still provide the result via completeError wrapping
               _envSyncCompleter!.completeError(result);
             }
           }
+          break;
+
+        // ── Interactive PTY shell responses ──────────────────────────────
+        case 'shell_started':
+          _isShellActive = true;
+          notifyListeners();
+          break;
+
+        case 'shell_output':
+          if (data['data'] is String) {
+            _shellOutputController.add(data['data'] as String);
+          }
+          break;
+
+        case 'shell_closed':
+          _isShellActive = false;
+          notifyListeners();
           break;
       }
     } catch (e) {
@@ -553,6 +577,39 @@ class TerminalProxyClient extends ChangeNotifier {
     return _envSyncCompleter!.future.timeout(timeout);
   }
 
+  // ── Interactive PTY shell session management ───────────────────────────
+
+  void startShell(int cols, int rows) {
+    if (!_isAuthenticated || _channel == null) return;
+    _channel!.sink.add(jsonEncode({
+      'type': 'shell_start',
+      'cols': cols,
+      'rows': rows,
+    }));
+  }
+
+  void shellInput(String data) {
+    if (!_isShellActive || _channel == null) return;
+    _channel!.sink.add(jsonEncode({
+      'type': 'shell_input',
+      'data': data,
+    }));
+  }
+
+  void shellResize(int cols, int rows) {
+    if (!_isShellActive || _channel == null) return;
+    _channel!.sink.add(jsonEncode({
+      'type': 'shell_resize',
+      'cols': cols,
+      'rows': rows,
+    }));
+  }
+
+  void closeShell() {
+    if (_channel == null) return;
+    _channel!.sink.add(jsonEncode({'type': 'shell_close'}));
+  }
+
   void clearOutput() {
     _outputs.clear();
     notifyListeners();
@@ -561,6 +618,7 @@ class TerminalProxyClient extends ChangeNotifier {
   void disconnect() {
     _reconnectTimer?.cancel();
     _reconnectAttempts = 0;
+    _isShellActive = false;
     _channel?.sink.close();
     _state = TerminalConnectionState.disconnected;
     _isAuthenticated = false;
@@ -578,6 +636,7 @@ class TerminalProxyClient extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _shellOutputController.close();
     disconnect();
     super.dispose();
   }

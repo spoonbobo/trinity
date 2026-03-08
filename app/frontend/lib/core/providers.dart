@@ -39,16 +39,20 @@ void _syncAuthToken(AuthClient authClient) {
 final gatewayClientProvider = ChangeNotifierProvider<gw.GatewayClient>((ref) {
   final authClient = ref.read(authClientProvider);
   _syncAuthToken(authClient);
+  final client = gw.GatewayClient(url: _gatewayWsUrl, auth: _sharedAuth);
+  client.setOpenClawId(authClient.state.activeOpenClawId);
   // Listen for future auth state changes and push new JWT to gateway auth.
   authClient.addListener(() => _syncAuthToken(authClient));
-  return gw.GatewayClient(url: _gatewayWsUrl, auth: _sharedAuth);
+  return client;
 });
 
 final terminalClientProvider = ChangeNotifierProvider<TerminalProxyClient>((ref) {
   final authClient = ref.read(authClientProvider);
   _syncAuthToken(authClient);
   final role = roleToString(authClient.state.role);
-  return TerminalProxyClient(url: _terminalWsUrl, auth: _sharedAuth, role: role);
+  final client = TerminalProxyClient(url: _terminalWsUrl, auth: _sharedAuth, role: role);
+  client.setOpenClawId(authClient.state.activeOpenClawId);
+  return client;
 });
 
 /// Create an independent TerminalProxyClient for scoped use (e.g. per-channel
@@ -57,7 +61,9 @@ TerminalProxyClient createScopedTerminalClient(WidgetRef ref) {
   final authClient = ref.read(authClientProvider);
   _syncAuthToken(authClient);
   final role = roleToString(authClient.state.role);
-  return TerminalProxyClient(url: _terminalWsUrl, auth: _sharedAuth, role: role);
+  final client = TerminalProxyClient(url: _terminalWsUrl, auth: _sharedAuth, role: role);
+  client.setOpenClawId(authClient.state.activeOpenClawId);
+  return client;
 }
 
 /// Active session key — defaults to 'main'.

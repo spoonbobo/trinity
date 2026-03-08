@@ -6,4 +6,5 @@ build/
 *.iml
 .idea/
 .pub/
+fonts/
 # NOTE: pubspec.lock is intentionally committed for reproducible builds

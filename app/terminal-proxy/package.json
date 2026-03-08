@@ -16,7 +16,8 @@
     "jsonwebtoken": "^9.0.2",
     "js-yaml": "^4.1.0",
     "helmet": "^8.0.0",
-    "express-rate-limit": "^7.4.0"
+    "express-rate-limit": "^7.4.0",
+    "node-pty": "^1.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

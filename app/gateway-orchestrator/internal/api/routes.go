@@ -331,6 +331,18 @@ func (h *Handler) handleResolveOpenClaw(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: "openclaw not found"})
 		return
 	}
+	if oc.Status == "provisioning" {
+		podStatus, err := h.k8s.GetOpenClawPodStatus(ctx, oc)
+		if err == nil && podStatus == "Running/ready" {
+			if uerr := h.store.UpdateOpenClawStatus(
+				ctx, oc.ID, "running", oc.PodName, oc.ServiceName, oc.PVCName, "",
+			); uerr != nil {
+				log.Printf("WARN resolve: failed to transition %s to running: %v", id, uerr)
+			} else {
+				oc.Status = "running"
+			}
+		}
+	}
 	if oc.Status != "running" {
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "openclaw is not running (status: " + oc.Status + ")"})
 		return

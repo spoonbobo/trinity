@@ -41,6 +41,8 @@ class _AdminOpenClawsTabState extends ConsumerState<AdminOpenClawsTab> {
   // Delete confirmation
   String? _confirmDeleteId;
 
+  Timer? _pollTimer;
+
   @override
   void initState() {
     super.initState();
@@ -49,22 +51,41 @@ class _AdminOpenClawsTabState extends ConsumerState<AdminOpenClawsTab> {
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _nameController.dispose();
     _descController.dispose();
     super.dispose();
+  }
+
+  void _startPollingIfNeeded() {
+    _pollTimer?.cancel();
+    if (!mounted) return;
+    final hasTransitional = _instances.any((i) {
+      final s = (i['status'] ?? '').toString().toLowerCase();
+      return s == 'provisioning' || s == 'pending' || s == 'deleting';
+    });
+    if (hasTransitional) {
+      _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+        if (mounted) _load();
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------
   // HTTP helpers
   // ---------------------------------------------------------------------------
 
-  String? get _token => ref.read(authClientProvider).state.token;
+  String? get _token {
+    if (!mounted) return null;
+    return ref.read(authClientProvider).state.token;
+  }
 
   Future<String> _httpGet(String path) async {
+    final token = _token;
     final url = '$_baseUrl$path';
     final request = html.HttpRequest();
     request.open('GET', url);
-    request.setRequestHeader('Authorization', 'Bearer $_token');
+    request.setRequestHeader('Authorization', 'Bearer $token');
     request.setRequestHeader('Content-Type', 'application/json');
     final completer = Completer<String>();
     request.onLoad.listen((_) {
@@ -80,10 +101,11 @@ class _AdminOpenClawsTabState extends ConsumerState<AdminOpenClawsTab> {
   }
 
   Future<String> _httpPost(String path, Map<String, dynamic> body) async {
+    final token = _token;
     final url = '$_baseUrl$path';
     final request = html.HttpRequest();
     request.open('POST', url);
-    request.setRequestHeader('Authorization', 'Bearer $_token');
+    request.setRequestHeader('Authorization', 'Bearer $token');
     request.setRequestHeader('Content-Type', 'application/json');
     final completer = Completer<String>();
     request.onLoad.listen((_) {
@@ -99,10 +121,11 @@ class _AdminOpenClawsTabState extends ConsumerState<AdminOpenClawsTab> {
   }
 
   Future<String> _httpDelete(String path) async {
+    final token = _token;
     final url = '$_baseUrl$path';
     final request = html.HttpRequest();
     request.open('DELETE', url);
-    request.setRequestHeader('Authorization', 'Bearer $_token');
+    request.setRequestHeader('Authorization', 'Bearer $token');
     request.setRequestHeader('Content-Type', 'application/json');
     final completer = Completer<String>();
     request.onLoad.listen((_) {
@@ -122,6 +145,7 @@ class _AdminOpenClawsTabState extends ConsumerState<AdminOpenClawsTab> {
   // ---------------------------------------------------------------------------
 
   Future<void> _load() async {
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -137,6 +161,7 @@ class _AdminOpenClawsTabState extends ConsumerState<AdminOpenClawsTab> {
           list.map((e) => Map<String, dynamic>.from(e as Map)),
         );
       });
+      _startPollingIfNeeded();
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'failed to load instances: $e');
@@ -146,6 +171,7 @@ class _AdminOpenClawsTabState extends ConsumerState<AdminOpenClawsTab> {
   }
 
   Future<void> _loadAssignments(String instanceId) async {
+    if (!mounted) return;
     setState(() {
       _loadingAssignments = true;
       _assignments = [];
@@ -170,7 +196,7 @@ class _AdminOpenClawsTabState extends ConsumerState<AdminOpenClawsTab> {
   }
 
   Future<void> _loadAllUsers() async {
-    if (_allUsers.isNotEmpty) return;
+    if (_allUsers.isNotEmpty || !mounted) return;
     setState(() => _loadingUsers = true);
 
     try {
@@ -196,7 +222,7 @@ class _AdminOpenClawsTabState extends ConsumerState<AdminOpenClawsTab> {
 
   Future<void> _createInstance() async {
     final name = _nameController.text.trim();
-    if (name.isEmpty) return;
+    if (name.isEmpty || !mounted) return;
     final description = _descController.text.trim();
 
     setState(() => _creating = true);
@@ -221,6 +247,7 @@ class _AdminOpenClawsTabState extends ConsumerState<AdminOpenClawsTab> {
   }
 
   Future<void> _deleteInstance(String id, String name) async {
+    if (!mounted) return;
     setState(() => _confirmDeleteId = null);
 
     try {
@@ -244,8 +271,7 @@ class _AdminOpenClawsTabState extends ConsumerState<AdminOpenClawsTab> {
       if (!mounted) return;
       ToastService.showInfo(context, 'user assigned');
       await _loadAssignments(instanceId);
-      // Refresh the auth client's OpenClaw list so the shell reacts
-      // (especially if the current user was assigned)
+      if (!mounted) return;
       ref.read(authClientProvider).fetchUserOpenClaws();
     } catch (e) {
       if (!mounted) return;
@@ -259,7 +285,7 @@ class _AdminOpenClawsTabState extends ConsumerState<AdminOpenClawsTab> {
       if (!mounted) return;
       ToastService.showInfo(context, 'user unassigned');
       await _loadAssignments(instanceId);
-      // Refresh auth client's list in case the current user was unassigned
+      if (!mounted) return;
       ref.read(authClientProvider).fetchUserOpenClaws();
     } catch (e) {
       if (!mounted) return;

@@ -6,8 +6,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/gateway_client.dart' as gw;
 import '../../core/theme.dart';
 import '../../core/i18n.dart';
-import '../../core/auth_client.dart' show AuthRole, OpenClawInfo, OpenClawStatus;
+import '../../core/auth_client.dart'
+    show AuthRole, OpenClawInfo, OpenClawStatus, roleToString;
 import '../../core/providers.dart';
+import '../../core/terminal_client.dart' show TerminalConnectionState;
 import '../../core/toast_provider.dart';
 import '../../models/ws_frame.dart';
 import '../../main.dart' show languageProvider, authClientProvider;
@@ -113,18 +115,8 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       client.addListener(_onGatewayStateChange);
       // Listen for OpenClaw status changes (e.g. user gets unassigned)
       authClient.addListener(_onAuthStateChange);
-      // Only connect if user has an active OpenClaw assigned AND it's confirmed
-      // (openClawStatus == ready means fetchUserOpenClaws validated the list)
-      if (authClient.openClawStatus == OpenClawStatus.ready) {
-        final activeOC = authClient.state.activeOpenClaw;
-        if (activeOC != null) {
-          client.setOpenClawId(activeOC.id);
-          ref.read(terminalClientProvider).setOpenClawId(activeOC.id);
-          client.connect().catchError((e) {
-            debugPrint('[Shell] connect failed: $e');
-          });
-        }
-      }
+      _syncOpenClawRouting();
+      _connectActiveOpenClaw();
       _approvalSub = client.approvalEvents.listen((_) {
         if (!_showGovernance && mounted) {
           setState(() => _showGovernance = true);
@@ -138,21 +130,107 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     });
   }
 
+  void _syncOpenClawRouting() {
+    final authClient = ref.read(authClientProvider);
+    final activeId = authClient.state.activeOpenClawId;
+    final gwClient = ref.read(gatewayClientProvider);
+    final terminalClient = ref.read(terminalClientProvider);
+    gwClient.setOpenClawId(activeId);
+    terminalClient
+      ..setOpenClawId(activeId)
+      ..updateRole(roleToString(authClient.state.role));
+  }
+
+  void _connectActiveOpenClaw({bool showFeedback = false}) {
+    final authClient = ref.read(authClientProvider);
+    final gwClient = ref.read(gatewayClientProvider);
+    final terminalClient = ref.read(terminalClientProvider);
+
+    _syncOpenClawRouting();
+
+    switch (authClient.openClawStatus) {
+      case OpenClawStatus.loading:
+      case OpenClawStatus.unknown:
+        if (showFeedback && mounted) {
+          ToastService.showInfo(context, 'loading openclaws...');
+        }
+        return;
+      case OpenClawStatus.noOpenClaws:
+        if (showFeedback && mounted) {
+          ToastService.showError(context, 'no openclaw assigned');
+        }
+        return;
+      case OpenClawStatus.error:
+        if (showFeedback && mounted) {
+          ToastService.showError(
+            context,
+            authClient.openClawError ?? 'failed to load openclaws',
+          );
+        }
+        return;
+      case OpenClawStatus.ready:
+        break;
+    }
+
+    final activeOC = authClient.state.activeOpenClaw;
+    if (activeOC == null) {
+      if (showFeedback && mounted) {
+        ToastService.showError(context, 'no active openclaw selected');
+      }
+      return;
+    }
+
+    if (gwClient.state != gw.ConnectionState.connected &&
+        gwClient.state != gw.ConnectionState.connecting) {
+      gwClient.connect().catchError((e) {
+        debugPrint('[Shell] gateway connect failed: $e');
+      });
+    }
+
+    if (terminalClient.state != TerminalConnectionState.connected &&
+        terminalClient.state != TerminalConnectionState.connecting) {
+      terminalClient.connect().catchError((e) {
+        debugPrint('[Shell] terminal connect failed: $e');
+      });
+    }
+  }
+
   void _onAuthStateChange() {
     final authClient = ref.read(authClientProvider);
     final gwClient = ref.read(gatewayClientProvider);
+    final terminalClient = ref.read(terminalClientProvider);
+    final activeId = authClient.state.activeOpenClawId;
+    final routeChanged =
+        activeId != null &&
+        (gwClient.openclawId != activeId || terminalClient.openclawId != activeId);
 
     if (authClient.openClawStatus == OpenClawStatus.noOpenClaws) {
       // User lost all assignments -- disconnect
       gwClient.disconnect();
-      ref.read(terminalClientProvider).disconnect();
-    } else if (authClient.openClawStatus == OpenClawStatus.ready) {
-      final activeOC = authClient.state.activeOpenClaw;
-      if (activeOC != null && gwClient.state == gw.ConnectionState.disconnected) {
-        // User just got assigned -- connect
-        gwClient.setOpenClawId(activeOC.id);
-        ref.read(terminalClientProvider).setOpenClawId(activeOC.id);
-        gwClient.connect().catchError((_) {});
+      terminalClient.disconnect();
+      _syncOpenClawRouting();
+      return;
+    }
+
+    _syncOpenClawRouting();
+
+    if (authClient.openClawStatus == OpenClawStatus.ready) {
+      if (routeChanged &&
+          (gwClient.state == gw.ConnectionState.connected ||
+              gwClient.state == gw.ConnectionState.connecting ||
+              terminalClient.state == TerminalConnectionState.connected ||
+              terminalClient.state == TerminalConnectionState.connecting)) {
+        gwClient.disconnect();
+        terminalClient.disconnect();
+      }
+
+      final needsReconnect =
+          gwClient.state == gw.ConnectionState.disconnected ||
+          gwClient.state == gw.ConnectionState.error ||
+          terminalClient.state == TerminalConnectionState.disconnected ||
+          terminalClient.state == TerminalConnectionState.error;
+      if (needsReconnect) {
+        _connectActiveOpenClaw();
       }
     }
   }
@@ -617,12 +695,28 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     };
 
     final language = ref.watch(languageProvider);
-    final authState = ref.watch(authClientProvider).state;
+    final authClient = ref.watch(authClientProvider);
+    final authState = authClient.state;
+    final openClawStatus = authClient.openClawStatus;
     final isAdmin = authState.hasPermission('users.list');
     final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(color: t.fgMuted)
         ?? TextStyle(fontSize: 10, color: t.fgMuted);
     final unreadCount = ref.watch(notificationProvider).unreadCount;
     final activeSession = ref.watch(activeSessionProvider);
+    final reconnectTooltip = switch (openClawStatus) {
+      OpenClawStatus.loading => 'loading openclaws...',
+      OpenClawStatus.unknown => 'loading openclaws...',
+      OpenClawStatus.noOpenClaws => 'no openclaw assigned',
+      OpenClawStatus.error => authClient.openClawError ?? 'failed to load openclaws',
+      OpenClawStatus.ready => 'click to reconnect',
+    };
+    final reconnectLabel = switch (openClawStatus) {
+      OpenClawStatus.loading => 'waiting',
+      OpenClawStatus.unknown => 'waiting',
+      OpenClawStatus.noOpenClaws => 'assign required',
+      OpenClawStatus.error => 'retry',
+      OpenClawStatus.ready => 'reconnect',
+    };
 
     return Container(
       height: 28,
@@ -648,10 +742,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
           ),
           GestureDetector(
             onTap: state != gw.ConnectionState.connected && state != gw.ConnectionState.connecting
-                ? () {
-                    ref.read(gatewayClientProvider).connect().catchError((_) {});
-                    ref.read(terminalClientProvider).connect().catchError((_) {});
-                  }
+                ? () => _connectActiveOpenClaw(showFeedback: true)
                 : null,
             child: MouseRegion(
               cursor: state != gw.ConnectionState.connected && state != gw.ConnectionState.connecting
@@ -661,7 +752,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Tooltip(
-                    message: state != gw.ConnectionState.connected ? 'click to reconnect' : dotLabel,
+                    message: state != gw.ConnectionState.connected ? reconnectTooltip : dotLabel,
                     child: Container(
                       width: 6, height: 6,
                       decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
@@ -676,7 +767,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      'reconnect',
+                      reconnectLabel,
                       style: TextStyle(fontSize: 9, color: t.accentPrimary),
                     ),
                   ],
@@ -708,16 +799,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
               t: t,
               onSelect: (id) {
                 if (id == authState.activeOpenClawId) return;
-                final authClient = ref.read(authClientProvider);
-                authClient.selectOpenClaw(id);
-                final gw = ref.read(gatewayClientProvider);
-                gw.disconnect();
-                gw.setOpenClawId(id);
-                final tp = ref.read(terminalClientProvider);
-                tp.disconnect();
-                tp.setOpenClawId(id);
-                gw.connect().catchError((_) {});
-                tp.connect().catchError((_) {});
+                ref.read(authClientProvider).selectOpenClaw(id);
               },
             ),
           ],
