@@ -147,7 +147,7 @@ data:
                 try_files $uri =404;
             }
 
-            # Auth Service
+            # Auth Service (CORS handled by auth-service via ALLOWED_ORIGINS env)
             location /auth/ {
                 limit_req zone=auth_limit burst=20 nodelay;
                 proxy_pass http://auth_service;
@@ -158,8 +158,27 @@ data:
             }
 
             # Supabase GoTrue
+            # GoTrue hardcodes Access-Control-Allow-Origin: * and has no preflight
+            # handling, so nginx must own CORS for this route.
             location /supabase/auth/ {
                 limit_req zone=auth_limit burst=20 nodelay;
+
+                proxy_hide_header Access-Control-Allow-Origin;
+                proxy_hide_header Access-Control-Allow-Methods;
+                proxy_hide_header Access-Control-Allow-Headers;
+                proxy_hide_header Access-Control-Allow-Credentials;
+                proxy_hide_header Access-Control-Expose-Headers;
+
+                add_header Access-Control-Allow-Origin $http_origin always;
+                add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, PATCH, OPTIONS" always;
+                add_header Access-Control-Allow-Headers "Authorization, apikey, x-client-info, Content-Type, Accept, Range" always;
+                add_header Access-Control-Allow-Credentials "true" always;
+                add_header Access-Control-Max-Age 86400 always;
+
+                if ($request_method = OPTIONS) {
+                    return 204;
+                }
+
                 rewrite ^/supabase/auth/(.*)$ /$1 break;
                 proxy_pass http://supabase_auth;
                 proxy_set_header Host $host;

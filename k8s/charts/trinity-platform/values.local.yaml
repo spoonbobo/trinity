@@ -15,9 +15,9 @@ secrets:
   orchestratorServiceToken: "local-orchestrator-token-123"
 
 urls:
-  apiExternalUrl: "http://localhost:8080"
-  siteUrl: "http://localhost:8080"
-  allowedOrigins: "http://localhost:8080,http://trinity.local"
+  apiExternalUrl: "http://localhost"
+  siteUrl: "http://localhost"
+  allowedOrigins: "http://localhost"
 
 superadmin:
   enabled: true
@@ -96,7 +96,7 @@ terminalProxy:
 ingress:
   enabled: true
   className: nginx
-  host: trinity.local
+  host: ""
 
 nginx:
   enabled: true

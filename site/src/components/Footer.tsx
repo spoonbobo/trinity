@@ -15,7 +15,7 @@ export default function Footer() {
             </p>
             <div className="mt-6 flex items-center gap-3">
               <a
-                href="https://github.com/spoonbobo/trinity-agi/"
+                href="https://github.com/spoonbobo/trinity/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#2a2a2a] bg-[#141414] transition hover:border-[#3a3a3a]"

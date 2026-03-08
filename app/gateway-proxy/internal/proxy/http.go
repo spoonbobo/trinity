@@ -6,7 +6,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 
-	"trinity-agi/gateway-proxy/internal/resolver"
+	"trinity/gateway-proxy/internal/resolver"
 )
 
 // HandleHTTP proxies an HTTP request to the upstream gateway pod using

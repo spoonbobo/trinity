@@ -30,8 +30,8 @@ export default function QuickStartPage() {
         </h2>
         <div className="rounded-xl border border-[#2a2a2a] bg-[#141414] p-6">
           <pre className="overflow-x-auto font-mono text-sm text-[#8b8b8b]">
-            <code>{`git clone https://github.com/spoonbobo/trinity-agi/
-cd trinity-agi/web
+            <code>{`git clone https://github.com/spoonbobo/trinity/
+cd trinity/web
 
 # Copy the example env and fill in your secrets
 cp .env.example .env

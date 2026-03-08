@@ -1,7 +1,7 @@
 ---
 name: side-hustler
 description: End-to-end side hustle builder — researches your market, validates the idea, builds a product or landing page, sets up sales flow, and markets on social media while you sleep.
-homepage: https://github.com/trinityagi/trinity-agi
+homepage: https://github.com/trinityagi/trinity
 metadata:
   {
     "openclaw":

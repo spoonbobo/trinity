@@ -5,7 +5,7 @@ license: MIT
 compatibility: opencode
 metadata:
   audience: developers
-  workflow: trinity-agi
+  workflow: trinity
 ---
 
 ## What This Skill Covers
@@ -37,16 +37,16 @@ Browser -> Ingress -> nginx -> gateway-proxy:18800
 | supabase-auth | 9999 | supabase/gotrue:v2.170.0 | 1 | User auth (email/password + OIDC) |
 | keycloak | 8080 | quay.io/keycloak/keycloak:26.1 | 1 | IdP broker (LDAP/AD/OIDC) |
 | vault | 8200 | hashicorp/vault:1.15 | 1 | Secrets management |
-| auth-service | 18791 | ghcr.io/spoonbobo/trinity-agi/auth-service | 1 | JWT verify + RBAC + pod provisioning trigger |
-| gateway-orchestrator | 18801 | ghcr.io/spoonbobo/trinity-agi/gateway-orchestrator | 1-2 | Per-user pod lifecycle (create/delete/status) |
-| gateway-proxy | 18800 | ghcr.io/spoonbobo/trinity-agi/gateway-proxy | 2+ (HPA) | Routes users to their OpenClaw pods |
-| terminal-proxy | 18790 | ghcr.io/spoonbobo/trinity-agi/terminal-proxy | 1 | kubectl exec into per-user pods |
+| auth-service | 18791 | ghcr.io/spoonbobo/trinity/auth-service | 1 | JWT verify + RBAC + pod provisioning trigger |
+| gateway-orchestrator | 18801 | ghcr.io/spoonbobo/trinity/gateway-orchestrator | 1-2 | Per-user pod lifecycle (create/delete/status) |
+| gateway-proxy | 18800 | ghcr.io/spoonbobo/trinity/gateway-proxy | 2+ (HPA) | Routes users to their OpenClaw pods |
+| terminal-proxy | 18790 | ghcr.io/spoonbobo/trinity/terminal-proxy | 1 | kubectl exec into per-user pods |
 | nginx | 80 | nginx:1.27-alpine | 1 | Reverse proxy + SPA host (app subdomain) |
-| site | 3000 | ghcr.io/spoonbobo/trinity-agi/site | 1-2 | Marketing site + docs (Next.js, site subdomain) |
+| site | 3000 | ghcr.io/spoonbobo/trinity/site | 1-2 | Marketing site + docs (Next.js, site subdomain) |
 | loki | 3100 | grafana/loki:3.4.2 | 1 (StatefulSet) | Log aggregation |
 | grafana | 3000 | grafana/grafana:11.5.2 | 1 | Monitoring dashboards |
 | fluentd | - | fluent/fluentd:v1.16-1 | DaemonSet | Log collection |
-| openclaw-{userId} | 18789 | ghcr.io/spoonbobo/trinity-agi/openclaw | 1 per user | Per-user AI gateway |
+| openclaw-{userId} | 18789 | ghcr.io/spoonbobo/trinity/openclaw | 1 per user | Per-user AI gateway |
 
 ## Helm Charts
 
@@ -156,7 +156,7 @@ vault kv put secret/trinity/grafana \
 
 ### Container Registry
 
-Images are pushed to `ghcr.io/spoonbobo/trinity-agi/`. Auth:
+Images are pushed to `ghcr.io/spoonbobo/trinity/`. Auth:
 
 ```bash
 echo $GHCR_TOKEN | docker login ghcr.io -u spoonbobo --password-stdin
@@ -171,7 +171,7 @@ echo $GHCR_TOKEN | docker login ghcr.io -u spoonbobo --password-stdin
 eval $(minikube docker-env)
 
 # Or build and push to GHCR (for production):
-REGISTRY=ghcr.io/spoonbobo/trinity-agi
+REGISTRY=ghcr.io/spoonbobo/trinity
 
 docker build -t $REGISTRY/openclaw:latest -f app/Dockerfile.openclaw app/
 docker build -t $REGISTRY/auth-service:latest app/auth-service/
@@ -231,7 +231,7 @@ minikube service nginx -n trinity --url
 helm install trinity k8s/charts/trinity-platform \
   -n trinity --create-namespace \
   -f k8s/charts/trinity-platform/values.prod.yaml \
-  --set global.imageRegistry="ghcr.io/spoonbobo/trinity-agi/" \
+  --set global.imageRegistry="ghcr.io/spoonbobo/trinity/" \
   --set ingress.host="trinity.example.com" \
   --set ingress.tls.enabled=true \
   --set ingress.tls.secretName="trinity-tls"

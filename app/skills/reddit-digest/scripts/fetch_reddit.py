@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 
 import requests
 
-USER_AGENT = "reddit-digest/1.0 (openclaw skill; +https://github.com/trinityagi/trinity-agi)"
+USER_AGENT = "reddit-digest/1.0 (openclaw skill; +https://github.com/spoonbobo/trinity)"
 BASE_URL = "https://www.reddit.com"
 
 

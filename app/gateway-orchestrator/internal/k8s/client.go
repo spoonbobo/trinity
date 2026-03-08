@@ -18,7 +18,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 
-	"trinity-agi/gateway-orchestrator/internal/db"
+	"trinity/gateway-orchestrator/internal/db"
 )
 
 // Client wraps the Kubernetes clientset and provides resource operations.

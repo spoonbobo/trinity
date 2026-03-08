@@ -5,7 +5,7 @@ license: MIT
 compatibility: opencode
 metadata:
   audience: developers
-  workflow: trinity-agi
+  workflow: trinity
 ---
 
 ## What This Skill Covers

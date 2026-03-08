@@ -1,7 +1,7 @@
 ---
 name: meeting-notes
 description: Turn meeting transcripts into structured notes with action items, then optionally create tasks and post summaries to team channels.
-homepage: https://github.com/trinityagi/trinity-agi
+homepage: https://github.com/trinityagi/trinity
 metadata:
   {
     "openclaw":

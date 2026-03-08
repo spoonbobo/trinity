@@ -12,9 +12,9 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"trinity-agi/gateway-orchestrator/internal/db"
-	k8sclient "trinity-agi/gateway-orchestrator/internal/k8s"
-	"trinity-agi/gateway-orchestrator/internal/token"
+	"trinity/gateway-orchestrator/internal/db"
+	k8sclient "trinity/gateway-orchestrator/internal/k8s"
+	"trinity/gateway-orchestrator/internal/token"
 )
 
 // Handler holds dependencies for HTTP handlers.

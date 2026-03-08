@@ -19,7 +19,7 @@ export default function DocsLayout({
               HOME
             </Link>
             <a
-              href="https://github.com/spoonbobo/trinity-agi/"
+              href="https://github.com/spoonbobo/trinity/"
               target="_blank"
               rel="noopener noreferrer"
               className="font-mono text-xs tracking-wide text-[#6b6b6b] transition hover:text-[#e5e5e5]"

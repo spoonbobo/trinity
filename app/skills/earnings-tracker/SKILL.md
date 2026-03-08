@@ -1,7 +1,7 @@
 ---
 name: earnings-tracker
 description: Track tech and AI earnings season automatically — weekly calendar previews, per-company scheduled alerts, and detailed post-earnings summaries delivered to your messaging channel.
-homepage: https://github.com/trinityagi/trinity-agi
+homepage: https://github.com/trinityagi/trinity
 metadata:
   {
     "openclaw":

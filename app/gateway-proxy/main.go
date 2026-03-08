@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"trinity-agi/gateway-proxy/internal/proxy"
-	"trinity-agi/gateway-proxy/internal/resolver"
+	"trinity/gateway-proxy/internal/proxy"
+	"trinity/gateway-proxy/internal/resolver"
 )
 
 func main() {

@@ -1,7 +1,7 @@
 ---
 name: doc-convert
 description: Convert and extract text from PDFs, DOCX, images (OCR), and other document formats using the gateway's built-in document processing stack.
-homepage: https://github.com/trinityagi/trinity-agi
+homepage: https://github.com/trinityagi/trinity
 metadata:
   {
     "openclaw":

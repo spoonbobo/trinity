@@ -1,4 +1,4 @@
-module trinity-agi/gateway-proxy
+module trinity/gateway-proxy
 
 go 1.22.0
 

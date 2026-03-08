@@ -1,7 +1,7 @@
 ---
 name: idea-validator
 description: Validate project ideas before building by scanning GitHub, npm, and PyPI for existing competitors — returns a reality_signal score (0-100) indicating how crowded the space is.
-homepage: https://github.com/trinityagi/trinity-agi
+homepage: https://github.com/trinityagi/trinity
 metadata:
   {
     "openclaw":

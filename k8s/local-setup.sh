@@ -181,39 +181,103 @@ helm_deploy() {
     helm upgrade "$RELEASE_NAME" "$CHART_DIR" \
       -n "$NAMESPACE" \
       -f "$VALUES_LOCAL" \
-      --wait \
+      --no-hooks \
       --timeout 10m
   else
     info "Installing release $RELEASE_NAME..."
     helm install "$RELEASE_NAME" "$CHART_DIR" \
       -n "$NAMESPACE" \
       -f "$VALUES_LOCAL" \
-      --wait \
+      --create-namespace \
+      --no-hooks \
       --timeout 10m
   fi
   ok "Helm release $RELEASE_NAME deployed in namespace $NAMESPACE"
 }
 
-# ─── Step 8: Setup /etc/hosts ─────────────────────────────────────────────
-setup_hosts() {
-  local minikube_ip
-  minikube_ip="$(minikube ip 2>/dev/null || echo "")"
+# ─── Step 8: Fix ingress for minikube tunnel ──────────────────────────────
+fix_ingress() {
+  info "Patching ingress-nginx-controller to LoadBalancer for minikube tunnel..."
+  kubectl patch svc ingress-nginx-controller -n ingress-nginx \
+    -p '{"spec":{"type":"LoadBalancer"}}' 2>/dev/null || true
+  ok "Ingress controller set to LoadBalancer"
+}
 
-  if [ -z "$minikube_ip" ]; then
-    warn "Could not determine minikube IP -- you may need to add trinity.local to /etc/hosts manually"
+# ─── Step 9: Run DB schemas + migrations ──────────────────────────────────
+run_migrations() {
+  local MIGRATIONS_DIR="$PROJECT_ROOT/app/supabase/migrations"
+  local DB_PASSWORD
+  DB_PASSWORD=$(kubectl get secret trinity-secrets -n "$NAMESPACE" -o jsonpath='{.data.SUPABASE_POSTGRES_PASSWORD}' | base64 -d 2>/dev/null || echo "local-pg-password-123")
+
+  info "Waiting for supabase-db to be ready..."
+  kubectl wait --for=condition=Ready pod/supabase-db-0 -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
+
+  info "Creating keycloak + rbac schemas with grants..."
+  kubectl exec supabase-db-0 -n "$NAMESPACE" -- env PGPASSWORD="$DB_PASSWORD" psql -U supabase_admin -d supabase -c "
+    CREATE SCHEMA IF NOT EXISTS keycloak AUTHORIZATION postgres;
+    GRANT ALL ON SCHEMA keycloak TO postgres;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA keycloak GRANT ALL ON TABLES TO postgres;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA keycloak GRANT ALL ON SEQUENCES TO postgres;
+    CREATE SCHEMA IF NOT EXISTS rbac AUTHORIZATION postgres;
+    GRANT ALL ON SCHEMA rbac TO postgres;
+    GRANT ALL ON SCHEMA auth TO postgres;
+    GRANT ALL ON ALL TABLES IN SCHEMA auth TO postgres;
+    GRANT ALL ON ALL SEQUENCES IN SCHEMA auth TO postgres;
+    GRANT ALL ON ALL ROUTINES IN SCHEMA auth TO postgres;
+    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA auth GRANT ALL ON TABLES TO postgres;
+    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA auth GRANT ALL ON SEQUENCES TO postgres;
+    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA auth GRANT ALL ON ROUTINES TO postgres;
+    GRANT supabase_auth_admin TO postgres;
+  " 2>&1 || warn "Schema grants failed (may already exist)"
+
+  info "Running RBAC migrations..."
+  for f in "$MIGRATIONS_DIR"/0*.sql; do
+    [ -f "$f" ] || continue
+    info "  $(basename "$f")"
+    kubectl exec -i supabase-db-0 -n "$NAMESPACE" -- env PGPASSWORD="$DB_PASSWORD" psql -U postgres -d supabase < "$f" 2>&1 | tail -1 || true
+  done
+  ok "Migrations complete"
+}
+
+# ─── Step 10: Bootstrap admin user ────────────────────────────────────────
+bootstrap_admin() {
+  local ANON_KEY
+  ANON_KEY=$(kubectl get secret trinity-secrets -n "$NAMESPACE" -o jsonpath='{.data.SUPABASE_ANON_KEY}' | base64 -d 2>/dev/null || echo "")
+
+  if [ -z "$ANON_KEY" ]; then
+    warn "Could not read SUPABASE_ANON_KEY -- skipping admin bootstrap"
     return
   fi
 
-  if grep -q "trinity.local" /etc/hosts 2>/dev/null; then
-    ok "trinity.local already in /etc/hosts"
-  else
-    info "Adding $minikube_ip trinity.local to /etc/hosts (requires sudo)..."
-    echo "$minikube_ip trinity.local" | sudo tee -a /etc/hosts >/dev/null
-    ok "Added trinity.local -> $minikube_ip to /etc/hosts"
-  fi
+  info "Waiting for supabase-auth to be ready..."
+  for i in $(seq 1 30); do
+    if kubectl exec -n "$NAMESPACE" deploy/supabase-auth -- wget -qO- http://localhost:9999/health >/dev/null 2>&1; then
+      break
+    fi
+    sleep 3
+  done
+
+  info "Creating admin user (admin@trinity.local)..."
+  local SIGNUP_URL="http://supabase-auth:9999/signup"
+  kubectl exec -n "$NAMESPACE" deploy/supabase-auth -- wget -qO- \
+    --post-data='{"email":"admin@trinity.local","password":"admin123"}' \
+    --header="Content-Type: application/json" \
+    --header="apikey: $ANON_KEY" \
+    "$SIGNUP_URL" 2>/dev/null || true
+
+  info "Assigning superadmin role..."
+  local DB_PASSWORD
+  DB_PASSWORD=$(kubectl get secret trinity-secrets -n "$NAMESPACE" -o jsonpath='{.data.SUPABASE_POSTGRES_PASSWORD}' | base64 -d 2>/dev/null || echo "local-pg-password-123")
+  kubectl exec supabase-db-0 -n "$NAMESPACE" -- env PGPASSWORD="$DB_PASSWORD" psql -U postgres -d supabase -c "
+    INSERT INTO rbac.user_roles (user_id, role_id)
+    SELECT u.id, r.id FROM auth.users u, rbac.roles r
+    WHERE u.email = 'admin@trinity.local' AND r.name = 'superadmin'
+    ON CONFLICT DO NOTHING;
+  " 2>&1 || true
+  ok "Admin user bootstrapped"
 }
 
-# ─── Step 9: Print status ────────────────────────────────────────────────
+# ─── Step 11: Print status ───────────────────────────────────────────────
 print_status() {
   echo ""
   echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
@@ -222,20 +286,18 @@ print_status() {
   echo ""
   echo -e "  ${CYAN}Namespace:${NC}  $NAMESPACE"
   echo -e "  ${CYAN}Release:${NC}    $RELEASE_NAME"
-  echo -e "  ${CYAN}URL:${NC}        http://trinity.local"
+  echo -e "  ${CYAN}URL:${NC}        http://localhost  (requires: minikube tunnel)"
   echo -e "  ${CYAN}Admin:${NC}      admin@trinity.local / admin123"
-  echo -e "  ${CYAN}Keycloak:${NC}   http://trinity.local/keycloak (admin / local-kc-admin-123)"
-  echo -e "  ${CYAN}Grafana:${NC}    Disabled by default in local mode"
+  echo -e "  ${CYAN}Keycloak:${NC}   http://localhost/keycloak (admin / local-kc-admin-123)"
+  echo ""
+  echo -e "  ${YELLOW}Start the tunnel (keep running in a separate terminal):${NC}"
+  echo -e "    minikube tunnel"
   echo ""
   echo -e "  ${YELLOW}Useful commands:${NC}"
   echo -e "    kubectl get pods -n $NAMESPACE          # Check pod status"
+  echo -e "    k9s -n $NAMESPACE                       # Interactive dashboard"
   echo -e "    kubectl logs -f <pod> -n $NAMESPACE     # Stream logs"
-  echo -e "    minikube dashboard                      # K8s dashboard"
-  echo -e "    minikube tunnel                         # Expose LoadBalancer services"
-  echo -e "    helm upgrade trinity $CHART_DIR -n $NAMESPACE -f $VALUES_LOCAL"
-  echo ""
-  echo -e "  ${YELLOW}If ingress isn't reachable, run in a separate terminal:${NC}"
-  echo -e "    minikube tunnel"
+  echo -e "    helm upgrade trinity $CHART_DIR -n $NAMESPACE -f $VALUES_LOCAL --no-hooks"
   echo ""
 }
 
@@ -260,9 +322,10 @@ main() {
       build_images
       ;;
     deploy)
-      create_namespace
       helm_deploy
-      setup_hosts
+      fix_ingress
+      run_migrations
+      bootstrap_admin
       print_status
       ;;
     status)
@@ -281,9 +344,10 @@ main() {
       ensure_docker
       start_minikube
       build_images
-      create_namespace
       helm_deploy
-      setup_hosts
+      fix_ingress
+      run_migrations
+      bootstrap_admin
       print_status
       ;;
     *)

@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"trinity-agi/gateway-proxy/internal/auth"
-	"trinity-agi/gateway-proxy/internal/resolver"
+	"trinity/gateway-proxy/internal/auth"
+	"trinity/gateway-proxy/internal/resolver"
 )
 
 // Handler is the main HTTP handler that ties authentication, resolution,

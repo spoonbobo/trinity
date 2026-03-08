@@ -8,9 +8,9 @@ import (
 	"os"
 	"time"
 
-	"trinity-agi/gateway-orchestrator/internal/api"
-	"trinity-agi/gateway-orchestrator/internal/db"
-	k8sclient "trinity-agi/gateway-orchestrator/internal/k8s"
+	"trinity/gateway-orchestrator/internal/api"
+	"trinity/gateway-orchestrator/internal/db"
+	k8sclient "trinity/gateway-orchestrator/internal/k8s"
 
 	_ "github.com/lib/pq"
 	"k8s.io/client-go/kubernetes"

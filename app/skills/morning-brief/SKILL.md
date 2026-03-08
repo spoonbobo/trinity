@@ -1,7 +1,7 @@
 ---
 name: morning-brief
 description: Schedule and deliver a personalized morning briefing every day — covering news, tasks, content drafts, and AI-recommended actions — via Telegram, Discord, iMessage, or any connected channel.
-homepage: https://github.com/trinityagi/trinity-agi
+homepage: https://github.com/trinityagi/trinity
 metadata:
   {
     "openclaw":

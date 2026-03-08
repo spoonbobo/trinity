@@ -28,7 +28,7 @@ Infrastructure is managed via Helm on Kubernetes. See the `k8s-deploy` skill for
 
 - **Local dev**: minikube with `values.dev.yaml`
 - **Production**: any K8s cluster with `values.prod.yaml`
-- **Images**: pushed to `ghcr.io/spoonbobo/trinity-agi/`
+- **Images**: pushed to `ghcr.io/spoonbobo/trinity/`
 - **Docker Compose** (`app/docker-compose.yml`): legacy single-tenant mode, deprecated.
 
 ## Communication Protocol

@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/gateway_client.dart' as gw;
 import '../../core/theme.dart';
 import '../../core/i18n.dart';
-import '../../core/auth_client.dart' show OpenClawInfo, OpenClawStatus;
+import '../../core/auth_client.dart' show AuthRole, OpenClawInfo, OpenClawStatus;
 import '../../core/providers.dart';
 import '../../core/toast_provider.dart';
 import '../../models/ws_frame.dart';
@@ -378,7 +378,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     final chatFlex = ((10 - _canvasFlex) * 100).round();
     final canvasFlex = (_canvasFlex * 100).round();
 
-    if (hasNoOpenClaws) {
+    if (hasNoOpenClaws && authClient.state.role != AuthRole.superadmin) {
       return Scaffold(
         backgroundColor: t.surfaceBase,
         body: Center(

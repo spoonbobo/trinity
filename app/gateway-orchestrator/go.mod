@@ -1,4 +1,4 @@
-module trinity-agi/gateway-orchestrator
+module trinity/gateway-orchestrator
 
 go 1.22.0
 

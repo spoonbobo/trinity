@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"sync"
 
-	"trinity-agi/gateway-proxy/internal/resolver"
+	"trinity/gateway-proxy/internal/resolver"
 
 	"github.com/gorilla/websocket"
 )
