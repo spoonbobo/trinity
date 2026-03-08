@@ -37,6 +37,30 @@ String roleToString(AuthRole role) {
   }
 }
 
+DateTime? _parseJwtExpiry(String token) {
+  try {
+    final parts = token.split('.');
+    if (parts.length < 2) return null;
+    final normalized = base64.normalize(parts[1]);
+    final payload = jsonDecode(utf8.decode(base64Url.decode(normalized)));
+    if (payload is! Map) return null;
+    final exp = payload['exp'];
+    if (exp is num) {
+      return DateTime.fromMillisecondsSinceEpoch(
+        exp.toInt() * 1000,
+        isUtc: true,
+      );
+    }
+  } catch (_) {}
+  return null;
+}
+
+bool _isExpiredToken(String token) {
+  final expiry = _parseJwtExpiry(token);
+  if (expiry == null) return false;
+  return !expiry.isAfter(DateTime.now().toUtc());
+}
+
 class AuthState {
   final String? token;
   final String? userId;
@@ -163,6 +187,8 @@ class AuthClient extends ChangeNotifier {
     _restoreFromStorage();
   }
 
+  bool get _shouldLoadOpenClaws => _state.token != null && !_state.isGuest;
+
   void _restoreFromStorage() {
     final token = html.window.localStorage[_tokenKey];
     final role = html.window.localStorage[_roleKey];
@@ -172,6 +198,11 @@ class AuthClient extends ChangeNotifier {
     final activeOpenClawId = html.window.localStorage[_activeOpenClawIdKey];
 
     if (token != null && token.isNotEmpty) {
+      if (_isExpiredToken(token)) {
+        if (kDebugMode) debugPrint('[Auth] Stored token expired; clearing session');
+        logout();
+        return;
+      }
       List<String> permissions = [];
       if (permsJson != null && permsJson.isNotEmpty) {
         try {
@@ -192,7 +223,11 @@ class AuthClient extends ChangeNotifier {
       notifyListeners();
 
       // Restored session — fetch the user's assigned OpenClaw instances.
-      fetchUserOpenClaws();
+      if (_shouldLoadOpenClaws) {
+        fetchUserOpenClaws();
+      } else {
+        _openClawStatus = OpenClawStatus.noOpenClaws;
+      }
     }
   }
 
@@ -275,8 +310,9 @@ class AuthClient extends ChangeNotifier {
     _persistToStorage();
     notifyListeners();
 
-    // Fetch the user's assigned OpenClaw instances.
-    fetchUserOpenClaws();
+    _openClawStatus = OpenClawStatus.noOpenClaws;
+    _openClawError = null;
+    notifyListeners();
   }
 
   Future<void> _resolveSession(String accessToken, {String? email}) async {
@@ -302,9 +338,15 @@ class AuthClient extends ChangeNotifier {
     _persistToStorage();
     notifyListeners();
 
-    // Fetch the user's assigned OpenClaw instances.
+    // Fetch the user's assigned OpenClaw instances for non-guest sessions.
     // Fire-and-forget: the UI observes openClawStatus reactively.
-    fetchUserOpenClaws();
+    if (_shouldLoadOpenClaws) {
+      fetchUserOpenClaws();
+    } else {
+      _openClawStatus = OpenClawStatus.noOpenClaws;
+      _openClawError = null;
+      notifyListeners();
+    }
   }
 
   /// Resolve session from an SSO access token (used after OAuth callback).
@@ -320,17 +362,28 @@ class AuthClient extends ChangeNotifier {
   /// via `GET /auth/openclaws`. Called automatically after login or session
   /// restore. The UI can observe [openClawStatus] reactively.
   Future<void> fetchUserOpenClaws() async {
-    if (_state.token == null) return;
+    if (!_shouldLoadOpenClaws) {
+      _openClawStatus = OpenClawStatus.noOpenClaws;
+      _openClawError = null;
+      notifyListeners();
+      return;
+    }
 
     _openClawStatus = OpenClawStatus.loading;
     _openClawError = null;
     notifyListeners();
 
     try {
-      final uri = Uri.parse('$authServiceBaseUrl/auth/openclaws');
+      final uri = Uri.parse('$authServiceBaseUrl/auth/openclaws').replace(
+        queryParameters: {
+          'ts': DateTime.now().millisecondsSinceEpoch.toString(),
+        },
+      );
       final request = html.HttpRequest();
       request.open('GET', uri.toString());
       request.setRequestHeader('Authorization', 'Bearer ${_state.token}');
+      request.setRequestHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      request.setRequestHeader('Pragma', 'no-cache');
 
       final completer = _createRequestCompleter(request);
       request.send();

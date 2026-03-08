@@ -1,7 +1,25 @@
 -- RBAC Schema (NIST Level 2: Roles + Permissions + Hierarchy)
 -- Runs against supabase-db postgres
 
-CREATE SCHEMA IF NOT EXISTS rbac;
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS pgcrypto;
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'pgcrypto extension requires elevated privileges; ensure it exists before running RBAC migrations';
+END;
+$$;
+
+DO $$
+BEGIN
+  CREATE SCHEMA IF NOT EXISTS rbac;
+EXCEPTION WHEN insufficient_privilege THEN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.schemata WHERE schema_name = 'rbac'
+  ) THEN
+    RAISE;
+  END IF;
+END;
+$$;
 
 -- Roles with hierarchy support
 CREATE TABLE rbac.roles (

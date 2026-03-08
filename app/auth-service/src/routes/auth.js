@@ -10,6 +10,20 @@ const ORCHESTRATOR_URL = process.env.ORCHESTRATOR_URL;
 const ORCHESTRATOR_SERVICE_TOKEN = process.env.ORCHESTRATOR_SERVICE_TOKEN;
 const GUEST_JWT_TTL = 3600; // 1 hour
 
+async function fetchAssignedOpenClawsForUser(userId) {
+  const orchRes = await fetch(`${ORCHESTRATOR_URL}/users/${userId}/openclaws`, {
+    headers: { Authorization: `Bearer ${ORCHESTRATOR_SERVICE_TOKEN}` },
+  });
+
+  if (!orchRes.ok) {
+    const err = new Error(`Failed to list user openclaws: ${orchRes.status}`);
+    err.status = orchRes.status;
+    throw err;
+  }
+
+  return orchRes.json();
+}
+
 // GET /auth/me - current user info + permissions
 router.get('/me', (req, res) => {
   res.json({
@@ -32,17 +46,7 @@ router.get('/permissions', (req, res) => {
 router.get('/openclaws', async (req, res) => {
   try {
     const userId = req.user.id;
-
-    const orchRes = await fetch(`${ORCHESTRATOR_URL}/users/${userId}/openclaws`, {
-      headers: { Authorization: `Bearer ${ORCHESTRATOR_SERVICE_TOKEN}` },
-    });
-
-    if (!orchRes.ok) {
-      console.error(`[auth] Failed to list user openclaws: ${orchRes.status}`);
-      return res.status(502).json({ error: 'Failed to list OpenClaws' });
-    }
-
-    const openclaws = await orchRes.json();
+    const openclaws = await fetchAssignedOpenClawsForUser(userId);
 
     // For each openclaw, get live status
     const enriched = await Promise.all(
@@ -77,14 +81,15 @@ router.get('/openclaws/:id/status', async (req, res) => {
     // Verify user is assigned (or is admin)
     const isAdmin = ['admin', 'superadmin'].includes(req.user.role);
     if (!isAdmin) {
-      const clawsRes = await fetch(`${ORCHESTRATOR_URL}/users/${userId}/openclaws`, {
-        headers: { Authorization: `Bearer ${ORCHESTRATOR_SERVICE_TOKEN}` },
-      });
-      if (clawsRes.ok) {
-        const claws = await clawsRes.json();
-        if (!claws.some(c => c.id === openclawId)) {
-          return res.status(403).json({ error: 'Not assigned to this OpenClaw' });
-        }
+      let claws;
+      try {
+        claws = await fetchAssignedOpenClawsForUser(userId);
+      } catch (err) {
+        console.error('[auth] OpenClaw assignment lookup failed:', err);
+        return res.status(502).json({ error: 'Failed to verify OpenClaw assignment' });
+      }
+      if (!claws.some(c => c.id === openclawId)) {
+        return res.status(403).json({ error: 'Not assigned to this OpenClaw' });
       }
     }
 

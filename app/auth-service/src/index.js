@@ -11,6 +11,7 @@ const usersRoutes = require('./routes/users');
 
 const app = express();
 const PORT = parseInt(process.env.AUTH_SERVICE_PORT || '18791', 10);
+app.set('trust proxy', 1);
 
 // Security: helmet for standard security headers (API-only service, strict CSP)
 app.use(helmet({
@@ -112,6 +113,17 @@ async function ensureDefaultSuperadmin() {
   }
 
   try {
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      try {
+        const healthResp = await fetch(`${gotrueUrl}/health`);
+        if (healthResp.ok) break;
+      } catch (_) {}
+      if (attempt == 10) {
+        throw new Error('supabase-auth not ready for superadmin bootstrap');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
     let userId = null;
 
     for (const emailOrId of [email, ...allowlist]) {

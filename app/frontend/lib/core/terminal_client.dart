@@ -53,6 +53,7 @@ class TerminalProxyClient extends ChangeNotifier {
   bool _disposed = false;
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
+  bool _shouldReconnect = true;
 
   /// Completer that resolves when auth succeeds (or fails/times out).
   Completer<void>? _authCompleter;
@@ -109,6 +110,7 @@ class TerminalProxyClient extends ChangeNotifier {
       return _authCompleter!.future;
     }
 
+    _shouldReconnect = true;
     _state = TerminalConnectionState.connecting;
     _authCompleter = Completer<void>();
     notifyListeners();
@@ -338,7 +340,9 @@ class TerminalProxyClient extends ChangeNotifier {
     }
     _failPendingEnvCompleters('Connection closed');
     notifyListeners();
-    _scheduleReconnect();
+    if (_shouldReconnect) {
+      _scheduleReconnect();
+    }
   }
 
   /// Auto-reconnect with exponential backoff (mirrors GatewayClient pattern)
@@ -616,6 +620,7 @@ class TerminalProxyClient extends ChangeNotifier {
   }
 
   void disconnect() {
+    _shouldReconnect = false;
     _reconnectTimer?.cancel();
     _reconnectAttempts = 0;
     _isShellActive = false;
@@ -636,6 +641,7 @@ class TerminalProxyClient extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _shouldReconnect = false;
     _shellOutputController.close();
     disconnect();
     super.dispose();

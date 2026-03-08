@@ -87,12 +87,6 @@ func (r *Resolver) Resolve(ctx context.Context, openclawID string) (*Backend, er
 // CheckAssignment verifies that a user is assigned to a specific OpenClaw
 // instance by querying the orchestrator's user openclaws endpoint.
 func (r *Resolver) CheckAssignment(ctx context.Context, userID, openclawID string) (bool, error) {
-	// Check cache first
-	cacheKey := "assign:" + userID + ":" + openclawID
-	if _, ok := r.cache.Get(cacheKey); ok {
-		return true, nil
-	}
-
 	url := fmt.Sprintf("%s/users/%s/openclaws", r.orchestratorURL, userID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -121,8 +115,6 @@ func (r *Resolver) CheckAssignment(ctx context.Context, userID, openclawID strin
 
 	for _, oc := range openclaws {
 		if oc.ID == openclawID {
-			// Cache the positive result
-			r.cache.Set(cacheKey, &Backend{}, r.cacheTTL)
 			return true, nil
 		}
 	}

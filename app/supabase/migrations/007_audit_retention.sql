@@ -108,7 +108,7 @@ BEGIN
   PERFORM cron.schedule(
     'audit_create_partitions',
     '5 0 1 * *',
-    $$SELECT rbac.ensure_audit_partitions(6)$$
+    $job$SELECT rbac.ensure_audit_partitions(6)$job$
   );
 EXCEPTION WHEN OTHERS THEN
   RAISE NOTICE 'Could not schedule audit_create_partitions via pg_cron: %', SQLERRM;
@@ -128,7 +128,7 @@ BEGIN
   PERFORM cron.schedule(
     'audit_retention_cleanup',
     '5 0 2 * *',
-    $$SELECT rbac.run_audit_retention(180)$$
+    $job$SELECT rbac.run_audit_retention(180)$job$
   );
 EXCEPTION WHEN OTHERS THEN
   RAISE NOTICE 'Could not schedule audit_retention_cleanup via pg_cron: %', SQLERRM;

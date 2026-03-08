@@ -120,6 +120,9 @@ spec:
               CREATE SCHEMA IF NOT EXISTS rbac AUTHORIZATION postgres;
               GRANT ALL ON SCHEMA rbac TO postgres;
 
+              -- Ensure pgcrypto is available before RBAC migrations use gen_random_uuid()
+              CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
               -- Grant postgres full access to auth schema (for GoTrue migrations)
               GRANT ALL ON SCHEMA auth TO postgres;
               GRANT ALL ON ALL TABLES IN SCHEMA auth TO postgres;

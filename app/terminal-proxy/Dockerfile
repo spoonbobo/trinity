@@ -7,8 +7,8 @@ RUN apk add --no-cache docker-cli curl python3 make g++ \
     && chmod +x kubectl \
     && mv kubectl /usr/local/bin/
 
-COPY package.json ./
-RUN npm install --production && apk del python3 make g++
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev && apk del python3 make g++
 
 COPY server.js ./
 COPY rbac-registry.js ./

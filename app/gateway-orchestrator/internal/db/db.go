@@ -12,7 +12,7 @@ type OpenClaw struct {
 	ID           string     `json:"id"`
 	Name         string     `json:"name"`
 	Description  string     `json:"description,omitempty"`
-	GatewayToken string     `json:"gateway_token,omitempty"`
+	GatewayToken string     `json:"-"`
 	PodName      string     `json:"pod_name,omitempty"`
 	ServiceName  string     `json:"service_name,omitempty"`
 	PVCName      string     `json:"pvc_name,omitempty"`

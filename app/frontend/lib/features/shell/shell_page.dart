@@ -64,6 +64,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
   int _mobilePanel = 0;
   // Track previous gateway state for reconnect toasts
   gw.ConnectionState? _prevGatewayState;
+  String? _lastObservedOpenClawId;
 
   @override
   void initState() {
@@ -112,6 +113,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       final client = ref.read(gatewayClientProvider);
       // Track connection state changes for reconnect toasts
       _prevGatewayState = client.state;
+      _lastObservedOpenClawId = authClient.state.activeOpenClawId;
       client.addListener(_onGatewayStateChange);
       // Listen for OpenClaw status changes (e.g. user gets unassigned)
       authClient.addListener(_onAuthStateChange);
@@ -172,8 +174,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
         break;
     }
 
-    final activeOC = authClient.state.activeOpenClaw;
-    if (activeOC == null) {
+    if (authClient.state.activeOpenClaw == null) {
       if (showFeedback && mounted) {
         ToastService.showError(context, 'no active openclaw selected');
       }
@@ -199,10 +200,12 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     final authClient = ref.read(authClientProvider);
     final gwClient = ref.read(gatewayClientProvider);
     final terminalClient = ref.read(terminalClientProvider);
-    final activeId = authClient.state.activeOpenClawId;
-    final routeChanged =
-        activeId != null &&
-        (gwClient.openclawId != activeId || terminalClient.openclawId != activeId);
+    final nextOpenClawId = authClient.state.activeOpenClawId;
+    final openClawChanged =
+        _lastObservedOpenClawId != null &&
+        nextOpenClawId != null &&
+        _lastObservedOpenClawId != nextOpenClawId;
+    _lastObservedOpenClawId = nextOpenClawId;
 
     if (authClient.openClawStatus == OpenClawStatus.noOpenClaws) {
       // User lost all assignments -- disconnect
@@ -215,15 +218,10 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     _syncOpenClawRouting();
 
     if (authClient.openClawStatus == OpenClawStatus.ready) {
-      if (routeChanged &&
-          (gwClient.state == gw.ConnectionState.connected ||
-              gwClient.state == gw.ConnectionState.connecting ||
-              terminalClient.state == TerminalConnectionState.connected ||
-              terminalClient.state == TerminalConnectionState.connecting)) {
+      if (openClawChanged) {
         gwClient.disconnect();
         terminalClient.disconnect();
       }
-
       final needsReconnect =
           gwClient.state == gw.ConnectionState.disconnected ||
           gwClient.state == gw.ConnectionState.error ||
@@ -451,6 +449,14 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     final isTablet = screenWidth >= _mobileBreakpoint && screenWidth < _tabletBreakpoint;
     final authClient = ref.watch(authClientProvider);
     final hasNoOpenClaws = authClient.openClawStatus == OpenClawStatus.noOpenClaws;
+
+    if (authClient.openClawStatus == OpenClawStatus.ready &&
+        authClient.state.activeOpenClaw != null &&
+        client.state == gw.ConnectionState.disconnected) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _connectActiveOpenClaw();
+      });
+    }
 
     // FIX: Both panels use dynamic flex derived from _canvasFlex
     final chatFlex = ((10 - _canvasFlex) * 100).round();
@@ -799,7 +805,13 @@ class _ShellPageState extends ConsumerState<ShellPage> {
               t: t,
               onSelect: (id) {
                 if (id == authState.activeOpenClawId) return;
+                final gwClient = ref.read(gatewayClientProvider);
+                final terminalClient = ref.read(terminalClientProvider);
+                gwClient.disconnect();
+                terminalClient.disconnect();
                 ref.read(authClientProvider).selectOpenClaw(id);
+                _syncOpenClawRouting();
+                _connectActiveOpenClaw();
               },
             ),
           ],

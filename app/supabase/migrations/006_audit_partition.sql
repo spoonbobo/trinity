@@ -140,17 +140,30 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ── Step 5: Pre-create partitions ───────────────────────────────────────
--- Create partitions for 3 months back (to cover legacy data) + 6 months ahead
+-- Create partitions to fully cover legacy data, then current month + 6 ahead.
 DO $$
 DECLARE
+  min_legacy_ts TIMESTAMPTZ;
+  max_legacy_ts TIMESTAMPTZ;
+  legacy_start DATE;
+  legacy_end DATE;
   m INTEGER;
   target_date DATE;
 BEGIN
-  -- 3 months back
-  FOR m IN REVERSE 3..1 LOOP
-    target_date := (date_trunc('month', now()) - (m || ' months')::INTERVAL)::DATE;
-    PERFORM rbac.create_audit_partition(target_date);
-  END LOOP;
+  SELECT min(created_at), max(created_at)
+  INTO min_legacy_ts, max_legacy_ts
+  FROM rbac.audit_log_legacy;
+
+  IF min_legacy_ts IS NOT NULL THEN
+    legacy_start := date_trunc('month', min_legacy_ts)::DATE;
+    legacy_end := date_trunc('month', max_legacy_ts)::DATE;
+    target_date := legacy_start;
+    WHILE target_date <= legacy_end LOOP
+      PERFORM rbac.create_audit_partition(target_date);
+      target_date := (target_date + INTERVAL '1 month')::DATE;
+    END LOOP;
+  END IF;
+
   -- Current month + 6 ahead
   FOR m IN 0..6 LOOP
     target_date := (date_trunc('month', now()) + (m || ' months')::INTERVAL)::DATE;

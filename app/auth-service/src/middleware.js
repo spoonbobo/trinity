@@ -38,12 +38,13 @@ function verifyToken(req, res, next) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     const userId = decoded.sub || decoded.user_id || decoded.id;
+    const isGuestToken = decoded.role === GUEST_ROLE || (typeof userId === 'string' && userId.startsWith('guest:'));
     req.user = {
       id: userId,
       email: decoded.email,
       role: decoded.role || decoded.user_role,
       raw: decoded,
-      isGuest: false,
+      isGuest: isGuestToken,
     };
     // Audit login success for session-creation endpoints
     const sessionPaths = ['/auth/me'];
@@ -97,12 +98,14 @@ async function resolveRole(req, res, next) {
     req.user.role = role;
     const permissions = await getEffectivePermissions(req.user.id);
     req.user.permissions = permissions;
+    req.user.isGuest = role === GUEST_ROLE;
     next();
   } catch (err) {
     // On DB failure, fail closed: assign guest with safe-tier permissions only
     console.error('[auth] Role resolution error:', err.message);
     req.user.role = GUEST_ROLE;
     req.user.permissions = getPermissionsByTier('safe');
+    req.user.isGuest = true;
     next();
   }
 }

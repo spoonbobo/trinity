@@ -360,8 +360,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        TERMINAL_WS_URL: ws://localhost/terminal/
-        AUTH_SERVICE_URL: http://localhost
+        GATEWAY_WS_URL: ${GATEWAY_WS_URL:-}
+        TERMINAL_WS_URL: ${TERMINAL_WS_URL:-}
+        AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-}
         SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?Set SUPABASE_ANON_KEY in .env}
     container_name: trinity-flutter-builder
     volumes:

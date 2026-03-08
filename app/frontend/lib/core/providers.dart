@@ -1,13 +1,33 @@
+import 'dart:html' as html;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'gateway_client.dart' as gw;
 import 'auth.dart';
 import 'terminal_client.dart';
 import 'auth_client.dart' show AuthClient, AuthRole, OpenClawInfo, OpenClawStatus, roleToString;
 
-const _authBaseUrl = String.fromEnvironment(
-  'AUTH_SERVICE_URL',
-  defaultValue: 'http://localhost',
-);
+String _resolveAuthBaseUrl() {
+  const configured = String.fromEnvironment('AUTH_SERVICE_URL', defaultValue: '');
+  if (configured.isNotEmpty) return configured;
+  return html.window.location.origin;
+}
+
+String _resolveGatewayWsUrl() {
+  const configured = String.fromEnvironment('GATEWAY_WS_URL', defaultValue: '');
+  if (configured.isNotEmpty) return configured;
+  final location = html.window.location;
+  final scheme = location.protocol == 'https:' ? 'wss' : 'ws';
+  return '$scheme://${location.host}/ws';
+}
+
+String _resolveTerminalWsUrl() {
+  const configured = String.fromEnvironment('TERMINAL_WS_URL', defaultValue: '');
+  if (configured.isNotEmpty) return configured;
+  final location = html.window.location;
+  final scheme = location.protocol == 'https:' ? 'wss' : 'ws';
+  return '$scheme://${location.host}/terminal/';
+}
+
+final _authBaseUrl = _resolveAuthBaseUrl();
 
 final authClientProvider = ChangeNotifierProvider<AuthClient>((ref) {
   return AuthClient(authServiceBaseUrl: _authBaseUrl);
@@ -19,14 +39,8 @@ final _sharedDevice = DeviceIdentity.generate();
 /// The token is updated by [_syncAuthToken] whenever the auth state changes.
 final _sharedAuth = GatewayAuth(token: '', device: _sharedDevice);
 
-const _gatewayWsUrl = String.fromEnvironment(
-  'GATEWAY_WS_URL',
-  defaultValue: 'ws://localhost:18789',
-);
-const _terminalWsUrl = String.fromEnvironment(
-  'TERMINAL_WS_URL',
-  defaultValue: 'ws://localhost/terminal/',
-);
+final _gatewayWsUrl = _resolveGatewayWsUrl();
+final _terminalWsUrl = _resolveTerminalWsUrl();
 
 /// Keep [_sharedAuth] in sync with the current JWT from [AuthClient].
 void _syncAuthToken(AuthClient authClient) {

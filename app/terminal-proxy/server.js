@@ -147,6 +147,21 @@ async function resolveRbacRole(jwtToken) {
   }
 }
 
+async function verifyOpenClawAssignment(jwtToken, openclawId) {
+  const res = await fetch(`${AUTH_SERVICE_URL}/auth/openclaws`, {
+    headers: { Authorization: `Bearer ${jwtToken}` },
+    signal: AbortSignal.timeout(5000),
+  });
+
+  if (!res.ok) {
+    throw new Error(`assignment lookup failed: ${res.status}`);
+  }
+
+  const data = await res.json();
+  const claws = Array.isArray(data) ? data : (Array.isArray(data?.openclaws) ? data.openclaws : []);
+  return claws.some((claw) => claw && claw.id === openclawId);
+}
+
 // ── Startup validation ─────────────────────────────────────────────────
 if (!GATEWAY_TOKEN || GATEWAY_TOKEN.length < 16) {
   console.error('[terminal-proxy] FATAL: OPENCLAW_GATEWAY_TOKEN must be set and >= 16 characters.');
@@ -616,8 +631,17 @@ wss.on('connection', (ws, req) => {
             }
           } else if (data.jwt && JWT_SECRET) {
             try {
-              const decoded = jwt.verify(data.jwt, JWT_SECRET);
-              authenticated = true;
+              let decoded;
+              try {
+                decoded = jwt.verify(data.jwt, JWT_SECRET);
+              } catch (_) {
+                safeSend(ws, {
+                  type: 'auth',
+                  status: 'error',
+                  message: 'Invalid JWT'
+                });
+                break;
+              }
               userId = decoded.sub || null;
 
               // Resolve RBAC role from auth-service (GoTrue JWT only has "authenticated")
@@ -627,6 +651,19 @@ wss.on('connection', (ws, req) => {
               // In kubectl mode, await pod resolution before sending auth ok.
               // Supports both legacy userId resolution and new openclawId resolution.
               openclawId = data.openclawId || null;
+              if (openclawId) {
+                const assigned = await verifyOpenClawAssignment(data.jwt, openclawId);
+                if (!assigned) {
+                  safeSend(ws, {
+                    type: 'auth',
+                    status: 'error',
+                    message: 'Not assigned to this OpenClaw'
+                  });
+                  break;
+                }
+              }
+
+              authenticated = true;
               if (EXEC_MODE === 'kubectl' && (openclawId || userId)) {
                 try {
                   const pod = openclawId
@@ -663,7 +700,7 @@ wss.on('connection', (ws, req) => {
               safeSend(ws, {
                 type: 'auth',
                 status: 'error',
-                message: 'Invalid JWT'
+                message: jwtErr.message || 'Authentication failed'
               });
             }
           } else {

@@ -51,6 +51,7 @@ class GatewayClient extends ChangeNotifier {
     if (_state == ConnectionState.connected ||
         _state == ConnectionState.connecting) return;
 
+    _shouldReconnect = true;
     _state = ConnectionState.connecting;
     notifyListeners();
 
@@ -82,6 +83,7 @@ class GatewayClient extends ChangeNotifier {
   bool _disposed = false;
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
+  bool _shouldReconnect = true;
 
   /// Only forward events the shell knows how to handle.
   static const _handledEvents = {
@@ -277,8 +279,10 @@ class GatewayClient extends ChangeNotifier {
     _state = ConnectionState.disconnected;
     _failPendingCompleters('Connection closed');
     notifyListeners();
-    // #3: Auto-reconnect with exponential backoff
-    _scheduleReconnect();
+    if (_shouldReconnect) {
+      // #3: Auto-reconnect with exponential backoff
+      _scheduleReconnect();
+    }
   }
 
   void _scheduleReconnect() {
@@ -301,6 +305,7 @@ class GatewayClient extends ChangeNotifier {
   }
 
   void disconnect() {
+    _shouldReconnect = false;
     _reconnectTimer?.cancel();
     _reconnectAttempts = 0;
     _channel?.sink.close();
@@ -485,6 +490,7 @@ class GatewayClient extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _shouldReconnect = false;
     disconnect();
     _eventController.close();
     super.dispose();

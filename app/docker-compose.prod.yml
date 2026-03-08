@@ -14,7 +14,7 @@ services:
       - "443:443"
     volumes:
       - flutter-build:/usr/share/nginx/html:ro
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
     deploy:
       resources:
