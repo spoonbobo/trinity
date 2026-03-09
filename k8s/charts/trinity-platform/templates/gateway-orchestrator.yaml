@@ -24,6 +24,28 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: gateway-orchestrator
+      initContainers:
+        - name: wait-for-rbac-db
+          image: {{ include "trinity.image" (dict "image" .Values.supabaseDb.image "global" .Values.global) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: SUPABASE_POSTGRES_PASSWORD
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              until pg_isready -h supabase-db -p 5432 -U supabase_admin; do
+                echo "[wait-for-rbac-db] waiting for postgres..."
+                sleep 2
+              done
+              until psql -h supabase-db -U supabase_admin -d supabase -tAc "select 1 from information_schema.tables where table_schema='rbac' and table_name='openclaws';" | grep -q 1; do
+                echo "[wait-for-rbac-db] waiting for rbac.openclaws table..."
+                sleep 2
+              done
       containers:
         - name: gateway-orchestrator
           image: {{ include "trinity.image" (dict "image" .Values.gatewayOrchestrator.image "global" .Values.global) }}
@@ -48,7 +70,7 @@ spec:
             - name: POSTGRES_DB
               value: "supabase"
             - name: POSTGRES_USER
-              value: "postgres"
+              value: "supabase_admin"
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:

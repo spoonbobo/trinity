@@ -24,7 +24,7 @@ func main() {
 	pgHost := envOrDefault("POSTGRES_HOST", "localhost")
 	pgPort := envOrDefault("POSTGRES_PORT", "5432")
 	pgDB := envOrDefault("POSTGRES_DB", "trinity")
-	pgUser := envOrDefault("POSTGRES_USER", "postgres")
+	pgUser := envOrDefault("POSTGRES_USER", "supabase_admin")
 	pgPassword := mustEnv("POSTGRES_PASSWORD")
 	openclawImage := envOrDefault("OPENCLAW_IMAGE", "openclaw/gateway:latest")
 	storageClass := envOrDefault("STORAGE_CLASS", "standard")

@@ -23,6 +23,28 @@ spec:
         vault.hashicorp.com/agent-inject-secret-supabase: "secret/data/trinity/supabase"
       {{- end }}
     spec:
+      initContainers:
+        - name: wait-for-keycloak-schema
+          image: {{ include "trinity.image" (dict "image" .Values.supabaseDb.image "global" .Values.global) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: SUPABASE_POSTGRES_PASSWORD
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              until pg_isready -h supabase-db -p 5432 -U postgres; do
+                echo "[wait-for-keycloak-schema] waiting for postgres..."
+                sleep 2
+              done
+              until psql -h supabase-db -U postgres -d supabase -tAc "select 1 from information_schema.schemata where schema_name='keycloak';" | grep -q 1; do
+                echo "[wait-for-keycloak-schema] waiting for keycloak schema..."
+                sleep 2
+              done
       containers:
         - name: keycloak
           image: {{ include "trinity.image" (dict "image" .Values.keycloak.image "global" .Values.global) }}
