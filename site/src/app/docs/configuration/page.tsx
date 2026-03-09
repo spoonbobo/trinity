@@ -18,7 +18,7 @@ export default function ConfigurationPage() {
           Core Secrets
         </h2>
         <p className="mb-4 font-sans text-sm text-[#8b8b8b]">
-          These must be set in <code className="text-[#6ee7b7]">web/.env</code> for Docker Compose,
+          These must be set in <code className="text-[#6ee7b7]">app/.env</code> for Docker Compose,
           or via <code className="text-[#6ee7b7]">--set secrets.*</code> for Helm.
         </p>
         <div className="space-y-4">
@@ -46,7 +46,7 @@ export default function ConfigurationPage() {
         <div className="space-y-4">
           {[
             { name: "ENABLE_DEFAULT_SUPERADMIN", def: "true", desc: "Bootstrap a superadmin user on first startup" },
-            { name: "DEFAULT_SUPERADMIN_EMAIL", def: "admin@trinity.local", desc: "Default superadmin email" },
+            { name: "DEFAULT_SUPERADMIN_EMAIL", def: "admin@trinity.work", desc: "Default superadmin email" },
             { name: "DEFAULT_SUPERADMIN_PASSWORD", def: "admin", desc: "Default superadmin password (change in production!)" },
             { name: "SUPERADMIN_ALLOWLIST", def: "(empty)", desc: "Comma-separated user IDs allowed superadmin access" },
           ].map((v) => (
@@ -94,25 +94,27 @@ global.imageRegistry: ""  # e.g. "ghcr.io/your-org/"
 
 # Ingress (main app)
 ingress.enabled: true
-ingress.host: ""          # empty = match all (dev)
-ingress.host: "app.trinity.ai"  # production
+ingress.host: ""                  # empty = match all / Minikube
+ingress.host: "app.trinity.work"  # custom domain
 
 # Marketing site
 site.enabled: true
-site.host: ""              # empty = NodePort (dev)
-site.host: "www.trinity.ai"  # production (creates Ingress)
+site.host: ""                  # empty = NodePort / Minikube
+site.host: "www.trinity.work"  # custom domain (creates Ingress)
 
 # Vault
-vault.devMode: true   # dev
-vault.devMode: false  # production
+vault.devMode: true   # Minikube
+vault.devMode: false  # other deployments
 
 # Gateway scaling
 gatewayProxy.replicas: 2
 gatewayOrchestrator.replicas: 1
 
-# Overlays
-# Dev:  values.dev.yaml  (small resources, single replicas)
-# Prod: values.prod.yaml (HA, TLS, strict security)`}</code>
+# Example overlay
+# Minikube: values.minikube.yaml
+#
+# Other environments:
+# create your own override file on top of values.yaml`}</code>
           </pre>
         </div>
       </div>

@@ -9,7 +9,7 @@ export default function InstallationPage() {
           Installation
         </h1>
         <p className="font-sans text-lg text-[#8b8b8b]">
-          Docker Compose for local development, Helm chart for Kubernetes production.
+          Docker Compose for single-machine development, Helm chart for Kubernetes deployments.
         </p>
       </div>
 
@@ -45,16 +45,16 @@ export default function InstallationPage() {
 
       <div className="mt-12">
         <h2 className="mb-6 font-sans text-2xl font-semibold text-[#e5e5e5]">
-          Docker Compose (Local / Dev)
+          Docker Compose
         </h2>
         <p className="mb-6 font-sans text-sm text-[#8b8b8b]">
-          The <code className="text-[#6ee7b7]">web/docker-compose.yml</code> file defines
+          The <code className="text-[#6ee7b7]">app/docker-compose.yml</code> file defines
           the full 14-service stack. Nginx listens on port 80 and reverse-proxies
           all backend services.
         </p>
         <div className="rounded-xl border border-[#2a2a2a] bg-[#141414] p-6">
           <pre className="overflow-x-auto font-mono text-sm text-[#8b8b8b]">
-            <code>{`cd web
+            <code>{`cd app
 
 # 1. Create .env with required secrets (see Configuration docs)
 cp .env.example .env
@@ -85,24 +85,24 @@ curl http://localhost     # should return the Flutter SPA`}</code>
         <div className="rounded-xl border border-[#2a2a2a] bg-[#141414] p-6">
           <pre className="overflow-x-auto font-mono text-sm text-[#8b8b8b]">
             <code>{`# Build container images first
-docker build -t trinity-frontend:latest web/frontend/
-docker build -t trinity-auth-service:latest web/auth-service/
-docker build -t trinity-terminal-proxy:latest web/terminal-proxy/
-docker build -t trinity-gateway-orchestrator:latest web/gateway-orchestrator/
-docker build -t trinity-gateway-proxy:latest web/gateway-proxy/
+docker build -t trinity-frontend:latest app/frontend/
+docker build -t trinity-auth-service:latest app/auth-service/
+docker build -t trinity-terminal-proxy:latest app/terminal-proxy/
+docker build -t trinity-gateway-orchestrator:latest app/gateway-orchestrator/
+docker build -t trinity-gateway-proxy:latest app/gateway-proxy/
 docker build -t trinity-site:latest site/
 
-# Install with Helm (dev overlay)
+# Install with the Minikube example values
 helm install trinity k8s/charts/trinity-platform \\
   -n trinity --create-namespace \\
-  -f k8s/charts/trinity-platform/values.dev.yaml \\
+  -f k8s/charts/trinity-platform/values.minikube.yaml \\
   --set secrets.supabaseJwtSecret=<secret> \\
   --set secrets.supabasePostgresPassword=<password>
 
-# Production overlay
+# Install with your own cluster override
 helm install trinity k8s/charts/trinity-platform \\
   -n trinity --create-namespace \\
-  -f k8s/charts/trinity-platform/values.prod.yaml \\
+  -f my-values.yaml \\
   --set secrets.supabaseJwtSecret=<secret> \\
   --set secrets.supabasePostgresPassword=<password>`}</code>
           </pre>

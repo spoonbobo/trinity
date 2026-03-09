@@ -1,4 +1,4 @@
--- Seed default superadmin account: admin@trinity.local / admin
+-- Seed default superadmin account: admin@trinity.work / admin
 -- GoTrue auto-confirms email (GOTRUE_MAILER_AUTOCONFIRM=true)
 -- This migration is idempotent; it only inserts if the user doesn't exist.
 

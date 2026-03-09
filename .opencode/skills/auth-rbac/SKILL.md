@@ -149,7 +149,7 @@ On auth-service startup (`ensureDefaultSuperadmin()`):
 | JWT_SECRET | (= SUPABASE_JWT_SECRET) | JWT verification secret |
 | SUPABASE_AUTH_URL | http://supabase-auth:9999 | GoTrue API base URL |
 | ENABLE_DEFAULT_SUPERADMIN | true | Bootstrap admin on startup |
-| DEFAULT_SUPERADMIN_EMAIL | admin@trinity.local | Default admin email |
+| DEFAULT_SUPERADMIN_EMAIL | admin@trinity.work | Default admin email |
 | DEFAULT_SUPERADMIN_PASSWORD | admin | Default admin password |
 | SUPERADMIN_ALLOWLIST | (empty) | Comma-separated allowed superadmin IDs |
 | POSTGRES_HOST | supabase-db | DB host |

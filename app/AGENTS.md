@@ -508,7 +508,7 @@ Three languages: English (`en`), Simplified Chinese (`zh-Hans`), Traditional Chi
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | ENABLE_DEFAULT_SUPERADMIN | true | Bootstrap admin on startup |
-| DEFAULT_SUPERADMIN_EMAIL | admin@trinity.local | Default admin email |
+| DEFAULT_SUPERADMIN_EMAIL | admin@trinity.work | Default admin email |
 | DEFAULT_SUPERADMIN_PASSWORD | admin | Default admin password |
 | SUPERADMIN_ALLOWLIST | (empty) | Comma-separated allowed superadmin user IDs |
 

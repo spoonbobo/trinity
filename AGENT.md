@@ -26,8 +26,8 @@ Trinity AGI is deployed on Kubernetes. Each user gets an isolated OpenClaw gatew
 
 Infrastructure is managed via Helm on Kubernetes. See the `k8s-deploy` skill for full deployment instructions.
 
-- **Local dev**: minikube with `values.dev.yaml`
-- **Production**: any K8s cluster with `values.prod.yaml`
+- **Minikube**: use `values.minikube.yaml`
+- **Other clusters**: any K8s cluster with `values.yaml` plus your own override file
 - **Images**: pushed to `ghcr.io/spoonbobo/trinity/`
 - **Docker Compose** (`app/docker-compose.yml`): legacy single-tenant mode, deprecated.
 
@@ -63,7 +63,7 @@ Every agent action that modifies system state must pass through OpenClaw's gover
 
 - Do not add traditional navigation bars, sidebars, or feature menus
 - Do not call LLM provider APIs directly — use OpenClaw Gateway
-- Do not store secrets in code — use Vault (K8s) or `.env` (local dev only)
+- Do not store secrets in code — use Vault (K8s) or `.env` for single-machine development
 - Do not disable sandbox mode or exec approvals
 - Do not add heavy UI frameworks or component libraries — keep the shell minimal
 - Do not commit `.env`

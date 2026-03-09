@@ -55,7 +55,7 @@ spec:
                   name: trinity-secrets
                   key: SUPABASE_POSTGRES_PASSWORD
             - name: OPENCLAW_IMAGE
-              value: {{ include "trinity.image" (dict "image" "openclaw:local" "global" .Values.global) }}
+              value: {{ include "trinity.image" (dict "image" "openclaw:trinity" "global" .Values.global) }}
             - name: OPENCLAW_CHART_PATH
               value: {{ .Values.gatewayOrchestrator.openclawChartPath | quote }}
             {{- if .Values.global.storageClass }}

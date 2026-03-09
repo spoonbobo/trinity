@@ -1,4 +1,4 @@
-# Example ApplicationSet for chart deployments.
+# Example ApplicationSet for Minikube chart deployments.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
@@ -9,15 +9,9 @@ spec:
   generators:
     - list:
         elements:
-          - env: dev
-            namespace: trinity-dev
-            valuesFile: values.dev.yaml
-          - env: stage
-            namespace: trinity-stage
-            valuesFile: values.stage.yaml
-          - env: prod
+          - env: minikube
             namespace: trinity
-            valuesFile: values.prod.yaml
+            valuesFile: values.minikube.yaml
   template:
     metadata:
       name: 'trinity-{{ .env }}'

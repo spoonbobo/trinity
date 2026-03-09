@@ -268,7 +268,7 @@ services:
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?Set SUPABASE_ANON_KEY in .env}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost}
       ENABLE_DEFAULT_SUPERADMIN: ${ENABLE_DEFAULT_SUPERADMIN:-false}
-      DEFAULT_SUPERADMIN_EMAIL: ${DEFAULT_SUPERADMIN_EMAIL:-admin@trinity.local}
+      DEFAULT_SUPERADMIN_EMAIL: ${DEFAULT_SUPERADMIN_EMAIL:-admin@trinity.work}
       DEFAULT_SUPERADMIN_PASSWORD: ${DEFAULT_SUPERADMIN_PASSWORD:?Set DEFAULT_SUPERADMIN_PASSWORD in .env}
       POSTGRES_HOST: supabase-db
       POSTGRES_PORT: 5432
@@ -294,7 +294,7 @@ services:
 
   # ─── OpenClaw Gateway ──────────────────────────────────────────────────
   openclaw-gateway:
-    image: openclaw:local
+    image: openclaw:trinity
     build:
       context: .
       dockerfile: Dockerfile.openclaw

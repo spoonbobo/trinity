@@ -20,7 +20,7 @@ From your ADFS administrator, you need:
 
 ## Enable (Kubernetes / Helm)
 
-In your Helm values override (e.g., `values.prod.yaml`):
+In your Helm values override file:
 
 ```yaml
 keycloak:
@@ -41,7 +41,7 @@ keycloak:
 Then upgrade:
 
 ```bash
-helm upgrade trinity ./k8s/charts/trinity-platform -n trinity -f values.prod.yaml
+helm upgrade trinity ./k8s/charts/trinity-platform -n trinity -f my-values.yaml
 ```
 
 The `keycloak-adfs-bootstrap` Job runs as a post-install/post-upgrade hook and configures the SAML IdP automatically.
@@ -92,7 +92,7 @@ Browser
   -> SAML AuthnRequest to ADFS
   -> User authenticates at ADFS
   -> SAML Response back to Keycloak
-  -> Keycloak creates/links local user ("first broker login" flow)
+  -> Keycloak creates/links the Trinity user ("first broker login" flow)
   -> OIDC token issued to trinity-shell client
   -> GoTrue / auth-service receives the Keycloak OIDC token as usual
 ```

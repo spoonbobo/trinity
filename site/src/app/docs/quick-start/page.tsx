@@ -89,7 +89,7 @@ docker compose --profile build run --rm frontend-builder`}</code>
         </p>
         <div className="rounded-xl border border-[#2a2a2a] bg-[#141414] p-6">
           <pre className="overflow-x-auto font-mono text-sm text-[#8b8b8b]">
-            <code>{`Email:    admin@trinity.local
+            <code>{`Email:    admin@trinity.work
 Password: admin`}</code>
           </pre>
         </div>

@@ -57,7 +57,7 @@ All shared services. Source: `k8s/charts/trinity-platform/`
 ```bash
 helm install trinity k8s/charts/trinity-platform \
   -n trinity --create-namespace \
-  -f k8s/charts/trinity-platform/values.dev.yaml
+  -f k8s/charts/trinity-platform/values.minikube.yaml
 ```
 
 ### openclaw-instance (per-user, managed by orchestrator)
@@ -72,20 +72,20 @@ Two separate Ingress resources route traffic by subdomain:
 
 | Subdomain | Ingress | Backend | Content |
 |-----------|---------|---------|---------|
-| `www.trinity.ai` (or `trinity.ai`) | `trinity-site-ingress` | site:3000 | Marketing landing page + docs (Next.js) |
-| `app.trinity.ai` | `trinity-ingress` | nginx:80 | Flutter shell + all APIs |
+| `www.trinity.work` (or `trinity.work`) | `trinity-site-ingress` | site:3000 | Marketing landing page + docs (Next.js) |
+| `app.trinity.work` | `trinity-ingress` | nginx:80 | Flutter shell + all APIs |
 
-Configure subdomains in `values.prod.yaml`:
+Configure subdomains in your Helm override file:
 ```yaml
 site:
-  host: "www.trinity.ai"
+  host: "www.trinity.work"
 ingress:
-  host: "app.trinity.ai"
+  host: "app.trinity.work"
 ```
 
 ## Nginx Routes (app subdomain, updated for multi-tenant)
 
-All routes below are on the **app subdomain** (`app.trinity.ai`):
+All routes below are on the **app subdomain** (`app.trinity.work`):
 
 | Route | Backend | Protocol | Notes |
 |-------|---------|----------|-------|
@@ -167,7 +167,7 @@ echo $GHCR_TOKEN | docker login ghcr.io -u spoonbobo --password-stdin
 ### Build all images
 
 ```bash
-# Inside minikube Docker daemon (for local dev):
+# Inside the minikube Docker daemon:
 eval $(minikube docker-env)
 
 # Or build and push to GHCR (for production):
@@ -187,7 +187,7 @@ for img in openclaw auth-service terminal-proxy gateway-orchestrator gateway-pro
 done
 ```
 
-### Deploy on minikube (local dev)
+### Deploy on minikube
 
 ```bash
 # 1. Start minikube with sufficient resources
@@ -195,7 +195,7 @@ minikube start --memory 16384 --cpus 4 --driver=docker
 
 # 2. Build images inside minikube
 eval $(minikube docker-env)
-docker build -t openclaw:local -f app/Dockerfile.openclaw app/
+docker build -t openclaw:trinity -f app/Dockerfile.openclaw app/
 docker build -t trinity-auth-service:latest app/auth-service/
 docker build -t trinity-terminal-proxy:latest app/terminal-proxy/
 docker build -t trinity-gateway-orchestrator:latest app/gateway-orchestrator/
@@ -214,7 +214,7 @@ helm install vault hashicorp/vault -n trinity --create-namespace \
 # 5. Install platform
 helm install trinity k8s/charts/trinity-platform \
   -n trinity \
-  -f k8s/charts/trinity-platform/values.dev.yaml
+  -f k8s/charts/trinity-platform/values.minikube.yaml
 
 # 6. Verify
 kubectl get pods -n trinity
@@ -230,7 +230,7 @@ minikube service nginx -n trinity --url
 # 1. Set registry
 helm install trinity k8s/charts/trinity-platform \
   -n trinity --create-namespace \
-  -f k8s/charts/trinity-platform/values.prod.yaml \
+  -f my-values.yaml \
   --set global.imageRegistry="ghcr.io/spoonbobo/trinity/" \
   --set ingress.host="trinity.example.com" \
   --set ingress.tls.enabled=true \
@@ -242,7 +242,7 @@ helm install trinity k8s/charts/trinity-platform \
 ```bash
 helm upgrade trinity k8s/charts/trinity-platform \
   -n trinity \
-  -f k8s/charts/trinity-platform/values.prod.yaml
+  -f my-values.yaml
 ```
 
 ## Database
@@ -273,8 +273,8 @@ Migrations: `app/supabase/migrations/001-005*.sql` (run on first DB start)
 
 **Pod not starting:**
 ```bash
-kubectl describe pod -l trinity.ai/user-id=<userId> -n trinity
-kubectl logs -l trinity.ai/user-id=<userId> -n trinity --tail=30
+kubectl describe pod -l trinity.work/user-id=<userId> -n trinity
+kubectl logs -l trinity.work/user-id=<userId> -n trinity --tail=30
 ```
 
 **Orchestrator issues:**

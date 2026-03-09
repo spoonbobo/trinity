@@ -28,7 +28,7 @@ data:
     userId: ""
     gatewayToken: ""
     namespace: trinity
-    image: openclaw:local
+    image: openclaw:trinity
     imageRegistry: ""
     imagePullPolicy: IfNotPresent
     storageClass: ""

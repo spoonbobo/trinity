@@ -148,7 +148,7 @@ spec:
 
               # --- Phase 3: Bootstrap admin user via GoTrue ---
               echo "[db-init] Bootstrapping admin user..."
-              ADMIN_EMAIL="${SUPERADMIN_EMAIL:-admin@trinity.local}"
+              ADMIN_EMAIL="${SUPERADMIN_EMAIL:-admin@trinity.work}"
               ADMIN_PASS="${SUPERADMIN_PASSWORD:-admin123}"
 
               # Wait for supabase-auth to be ready
@@ -195,7 +195,7 @@ spec:
                   name: trinity-secrets
                   key: SUPABASE_ANON_KEY
             - name: SUPERADMIN_EMAIL
-              value: {{ .Values.superadmin.email | default "admin@trinity.local" | quote }}
+              value: {{ .Values.superadmin.email | default "admin@trinity.work" | quote }}
             - name: SUPERADMIN_PASSWORD
               value: {{ .Values.superadmin.password | default "admin123" | quote }}
           volumeMounts:

@@ -90,8 +90,7 @@ async function ensureDefaultSuperadmin() {
   const enabled = (process.env.ENABLE_DEFAULT_SUPERADMIN || 'false') === 'true';
   if (!enabled) return;
 
-  const rawEmail = process.env.DEFAULT_SUPERADMIN_EMAIL || 'admin@trinity.local';
-  const email = rawEmail.includes('@') ? rawEmail : `${rawEmail}@trinity.local`;
+  const email = process.env.DEFAULT_SUPERADMIN_EMAIL || 'admin@trinity.work';
   const password = process.env.DEFAULT_SUPERADMIN_PASSWORD;
 
   if (!password || password === 'admin' || password.length < 8) {

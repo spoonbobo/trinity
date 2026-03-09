@@ -70,25 +70,25 @@ This Kubernetes path is intended for testing the chart and service wiring on you
 ### One-command setup
 
 ```bash
-./k8s/local-setup.sh all
+./k8s/minikube-setup.sh all
 ```
 
 This script:
 - installs required tools if missing
 - starts Docker Desktop if needed
 - starts Minikube
-- builds and loads local images
-- deploys the Helm chart into `trinity-local`
+- builds and loads cluster images
+- deploys the Helm chart into `trinity`
 - runs bootstrap and migration steps
 
 ### Useful commands
 
 ```bash
-./k8s/local-setup.sh start
-./k8s/local-setup.sh build
-./k8s/local-setup.sh deploy
-./k8s/local-setup.sh status
-./k8s/local-setup.sh teardown
+./k8s/minikube-setup.sh start
+./k8s/minikube-setup.sh build
+./k8s/minikube-setup.sh deploy
+./k8s/minikube-setup.sh status
+./k8s/minikube-setup.sh teardown
 ```
 
 ### Access the cluster app
@@ -108,8 +108,8 @@ Then open:
 - Loki readiness: [http://loki.localhost/ready](http://loki.localhost/ready)
 
 Default bootstrap credentials:
-- Trinity admin: `admin@trinity.local` / `admin123`
-- Keycloak admin: `admin` / `local-kc-admin-123`
+- Trinity admin: `admin@trinity.work` / `admin123`
+- Keycloak admin: `admin` / `trinity-kc-admin-123`
 
 ## License
 

@@ -1,7 +1,7 @@
 # ─── Global ────────────────────────────────────────────────────────────────
 global:
   namespace: trinity
-  # Container registry prefix (e.g., "ghcr.io/your-org/" or "" for local)
+  # Container registry prefix (e.g., "ghcr.io/your-org/" or "" for Minikube)
   imageRegistry: ""
   imagePullPolicy: IfNotPresent
   # Storage class for all PVCs. Set to "" to use cluster default.
@@ -30,7 +30,7 @@ urls:
 # ─── Superadmin ────────────────────────────────────────────────────────────
 superadmin:
   enabled: false
-  email: "admin@trinity.local"
+  email: "admin@trinity.work"
   password: ""
   allowlist: ""
 

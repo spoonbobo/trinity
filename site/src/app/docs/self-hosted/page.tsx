@@ -41,23 +41,19 @@ export default function SelfHostedPage() {
           Docker Compose
         </h2>
         <p className="mb-6 font-sans text-sm text-[#8b8b8b]">
-          The standard deployment method. All 14 services are defined in{" "}
-          <code className="text-[#6ee7b7]">web/docker-compose.yml</code> with a production
-          overlay at <code className="text-[#6ee7b7]">web/docker-compose.prod.yml</code>.
+          The standard deployment method. All services are defined in{" "}
+          <code className="text-[#6ee7b7]">app/docker-compose.yml</code>.
         </p>
         <div className="rounded-xl border border-[#2a2a2a] bg-[#141414] p-6">
           <pre className="overflow-x-auto font-mono text-sm text-[#8b8b8b]">
-            <code>{`cd web
+            <code>{`cd app
 
 # Build frontend
 docker compose --profile build build --no-cache frontend-builder
 docker compose --profile build run --rm frontend-builder
 
 # Start the stack
-docker compose up -d
-
-# Production mode (stricter security, TLS)
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`}</code>
+docker compose up -d`}</code>
           </pre>
         </div>
       </div>
@@ -67,23 +63,23 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`}</code>
           Kubernetes (Helm)
         </h2>
         <p className="mb-6 font-sans text-sm text-[#8b8b8b]">
-          For production K8s clusters. The Helm chart supports dev and prod value overlays,
-          per-user OpenClaw pod orchestration, HPA for gateway-proxy, and separate ingresses
-          for the app and marketing site.
+          For Kubernetes clusters. Use the public chart defaults with your own
+          override file, or use <code className="text-[#6ee7b7]">values.minikube.yaml</code> for
+          Minikube testing.
         </p>
         <div className="rounded-xl border border-[#2a2a2a] bg-[#141414] p-6">
           <pre className="overflow-x-auto font-mono text-sm text-[#8b8b8b]">
-            <code>{`# Dev (minikube)
+            <code>{`# Minikube
 helm install trinity k8s/charts/trinity-platform \\
   -n trinity --create-namespace \\
-  -f k8s/charts/trinity-platform/values.dev.yaml
+  -f k8s/charts/trinity-platform/values.minikube.yaml
 
-# Production
+# Custom cluster override
 helm install trinity k8s/charts/trinity-platform \\
   -n trinity --create-namespace \\
-  -f k8s/charts/trinity-platform/values.prod.yaml
+  -f my-values.yaml
 
-# Access locally
+# Access from your workstation
 # App:  via Ingress or kubectl port-forward svc/nginx 80:80
 # Site: via NodePort or kubectl port-forward svc/site 3001:3000`}</code>
           </pre>

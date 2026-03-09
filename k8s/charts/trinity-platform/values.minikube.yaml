@@ -1,18 +1,18 @@
-# Local minikube overlay -- minimal resources, dev secrets, single replicas
+# Minikube overlay -- minimal resources, dev secrets, single replicas
 global:
-  namespace: trinity-local
+  namespace: trinity
   imagePullPolicy: IfNotPresent
   storageClass: standard
 
 secrets:
-  supabaseJwtSecret: "local-dev-jwt-secret-at-least-32-chars-long!!"
+  supabaseJwtSecret: "trinity-dev-jwt-secret-at-least-32-chars-long!!"
   supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJpYXQiOjE3MDk0MDAwMDAsImV4cCI6MTg2NzA4MDAwMH0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE"
-  supabasePostgresPassword: "local-pg-password-123"
-  keycloakAdminPassword: "local-kc-admin-123"
-  keycloakClientSecret: "local-kc-client-secret-123"
-  grafanaPassword: "local-grafana-123"
+  supabasePostgresPassword: "trinity-pg-password-123"
+  keycloakAdminPassword: "trinity-kc-admin-123"
+  keycloakClientSecret: "trinity-kc-client-secret-123"
+  grafanaPassword: "trinity-grafana-123"
   vaultToken: "root"
-  orchestratorServiceToken: "local-orchestrator-token-123"
+  orchestratorServiceToken: "trinity-orchestrator-token-123"
   zenApiKey: ""
 
 urls:
@@ -22,7 +22,7 @@ urls:
 
 superadmin:
   enabled: true
-  email: "admin@trinity.local"
+  email: "admin@trinity.work"
   password: "admin123"
 
 vault:
