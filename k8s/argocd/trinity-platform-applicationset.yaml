@@ -1,0 +1,46 @@
+# Example ApplicationSet for chart deployments.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: trinity-platform
+  namespace: argocd
+spec:
+  goTemplate: true
+  generators:
+    - list:
+        elements:
+          - env: dev
+            namespace: trinity-dev
+            valuesFile: values.dev.yaml
+          - env: stage
+            namespace: trinity-stage
+            valuesFile: values.stage.yaml
+          - env: prod
+            namespace: trinity
+            valuesFile: values.prod.yaml
+  template:
+    metadata:
+      name: 'trinity-{{ .env }}'
+      labels:
+        app.kubernetes.io/name: trinity-platform
+        app.kubernetes.io/part-of: trinity-platform
+        trinity.work/environment: '{{ .env }}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/spoonbobo/trinity.git
+        targetRevision: main
+        path: k8s/charts/trinity-platform
+        helm:
+          releaseName: trinity
+          valueFiles:
+            - '{{ .valuesFile }}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{ .namespace }}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

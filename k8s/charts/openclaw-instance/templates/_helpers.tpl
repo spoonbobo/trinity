@@ -14,7 +14,7 @@ app.kubernetes.io/name: openclaw-instance
 app.kubernetes.io/instance: {{ include "openclaw.name" . }}
 app.kubernetes.io/managed-by: gateway-orchestrator
 app.kubernetes.io/part-of: trinity-platform
-trinity.ai/user-id: {{ .Values.userId | quote }}
+trinity.work/user-id: {{ .Values.userId | quote }}
 {{- range $key, $val := .Values.extraLabels }}
 {{ $key }}: {{ $val | quote }}
 {{- end }}

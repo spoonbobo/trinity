@@ -1,6 +1,6 @@
 {{- if and .Values.site.enabled .Values.ingress.enabled .Values.site.host }}
 # ─── Marketing Site Ingress (separate subdomain) ──────────────────────────
-# In production, routes site.host (e.g., www.trinity.ai) to the site service.
+# In production, routes site.host (e.g., www.trinity.work) to the site service.
 # Locally the site uses a NodePort service instead -- access via:
 #   minikube service site -n <namespace> --url
 apiVersion: networking.k8s.io/v1

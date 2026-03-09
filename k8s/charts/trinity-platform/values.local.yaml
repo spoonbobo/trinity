@@ -27,6 +27,7 @@ superadmin:
 
 vault:
   devMode: true
+  uiEnabled: true
   storage: 1Gi
   resources:
     limits:
@@ -96,6 +97,7 @@ terminalProxy:
 
 copilot:
   replicas: 1
+  defaultModel: "moonshotai/kimi-k2.5"
   resources:
     limits:
       memory: 1Gi
@@ -107,6 +109,29 @@ ingress:
   enabled: true
   className: nginx
   host: ""
+
+extraIngresses:
+  - name: vault
+    enabled: true
+    host: vault.localhost
+    path: /
+    pathType: Prefix
+    serviceName: vault
+    servicePort: 8200
+  - name: grafana
+    enabled: true
+    host: grafana.localhost
+    path: /
+    pathType: Prefix
+    serviceName: grafana
+    servicePort: 3000
+  - name: loki
+    enabled: true
+    host: loki.localhost
+    path: /
+    pathType: Prefix
+    serviceName: loki
+    servicePort: 3100
 
 nginx:
   enabled: true

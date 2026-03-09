@@ -49,6 +49,7 @@ supabaseDb:
 vault:
   image: hashicorp/vault:1.15
   devMode: true
+  uiEnabled: false
   storage: 1Gi
   # Vault Agent Injector: when enabled, pods receive Vault sidecar annotations.
   # Secrets are injected as files to /vault/secrets/. Disabled by default;
@@ -168,6 +169,7 @@ copilot:
   port: 18802
   replicas: 1
   opencodePort: 4096
+  defaultModel: "moonshotai/kimi-k2.5"
   resources:
     limits:
       memory: 1Gi
@@ -189,6 +191,22 @@ ingress:
   tls:
     enabled: false
     secretName: ""
+
+# Additional HTTP ingresses for services that should be reachable directly
+# through the cluster ingress controller, e.g. vault.localhost -> vault:8200.
+extraIngresses: []
+  # - name: vault
+  #   enabled: true
+  #   host: vault.localhost
+  #   path: /
+  #   pathType: Prefix
+  #   serviceName: vault
+  #   servicePort: 8200
+  #   annotations: {}
+  #   tls:
+  #     enabled: false
+  #     secretName: ""
+  #   className: ""
 
 # ─── Nginx (internal reverse proxy, optional if using ingress directly) ───
 nginx:
@@ -232,7 +250,7 @@ site:
   image: trinity-site:latest
   port: 3000
   replicas: 1
-  # Subdomain for the marketing site (e.g., www.trinity.ai or trinity.ai)
+  # Subdomain for the marketing site (e.g., www.trinity.work or trinity.work)
   # Leave empty to skip site Ingress creation
   host: ""
   tlsSecretName: ""

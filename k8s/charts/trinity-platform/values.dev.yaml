@@ -4,6 +4,11 @@ global:
   imagePullPolicy: Always
   storageClass: ""
 
+urls:
+  apiExternalUrl: "https://app.dev.trinity.work"
+  siteUrl: "https://dev.trinity.work"
+  allowedOrigins: "https://app.dev.trinity.work,https://dev.trinity.work"
+
 vault:
   devMode: true
 
@@ -49,13 +54,21 @@ grafana:
 
 site:
   enabled: true
-  host: ""
+  host: "dev.trinity.work"
+  tlsSecretName: "trinity-dev-site-tls"
   resources:
     limits:
       memory: 128Mi
     requests:
       memory: 64Mi
       cpu: 50m
+
+ingress:
+  enabled: true
+  host: "app.dev.trinity.work"
+  tls:
+    enabled: true
+    secretName: "trinity-dev-app-tls"
 
 superadmin:
   enabled: true

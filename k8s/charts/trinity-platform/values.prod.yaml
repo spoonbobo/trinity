@@ -3,6 +3,11 @@ global:
   namespace: trinity
   imagePullPolicy: IfNotPresent
 
+urls:
+  apiExternalUrl: "https://app.trinity.work"
+  siteUrl: "https://www.trinity.work"
+  allowedOrigins: "https://app.trinity.work,https://www.trinity.work"
+
 vault:
   devMode: false
   storage: 5Gi
@@ -52,13 +57,13 @@ superadmin:
 
 site:
   enabled: true
-  host: "www.trinity.ai"
+  host: "www.trinity.work"
   replicas: 2
   tlsSecretName: "trinity-site-tls"
 
 ingress:
   enabled: true
-  host: "app.trinity.ai"
+  host: "app.trinity.work"
   tls:
     enabled: true
     secretName: "trinity-app-tls"

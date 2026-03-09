@@ -1,0 +1,71 @@
+# Stage overlay -- prod-like defaults with reduced scale
+global:
+  namespace: trinity-stage
+  imagePullPolicy: IfNotPresent
+  storageClass: ""
+
+urls:
+  apiExternalUrl: "https://app.stage.trinity.work"
+  siteUrl: "https://stage.trinity.work"
+  allowedOrigins: "https://app.stage.trinity.work,https://stage.trinity.work"
+
+vault:
+  devMode: false
+  storage: 3Gi
+
+supabaseDb:
+  storage: 20Gi
+  resources:
+    limits:
+      memory: 1Gi
+    requests:
+      memory: 512Mi
+      cpu: 250m
+
+keycloak:
+  resources:
+    limits:
+      memory: 1Gi
+    requests:
+      memory: 512Mi
+      cpu: 250m
+
+gatewayOrchestrator:
+  replicas: 1
+  resources:
+    limits:
+      memory: 256Mi
+    requests:
+      memory: 128Mi
+      cpu: 100m
+
+gatewayProxy:
+  replicas: 2
+  resources:
+    limits:
+      memory: 512Mi
+    requests:
+      memory: 256Mi
+      cpu: 250m
+
+loki:
+  storage: 10Gi
+
+grafana:
+  storage: 5Gi
+
+superadmin:
+  enabled: false
+
+site:
+  enabled: true
+  host: "stage.trinity.work"
+  tlsSecretName: "trinity-stage-site-tls"
+  replicas: 1
+
+ingress:
+  enabled: true
+  host: "app.stage.trinity.work"
+  tls:
+    enabled: true
+    secretName: "trinity-stage-app-tls"

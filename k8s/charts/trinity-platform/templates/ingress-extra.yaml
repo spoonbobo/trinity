@@ -1,0 +1,49 @@
+{{- $root := . }}
+{{- range $ingress := .Values.extraIngresses }}
+{{- if and $ingress.enabled $ingress.name $ingress.serviceName $ingress.servicePort }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ printf "trinity-%s-ingress" $ingress.name | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "trinity.namespace" $root }}
+  labels:
+    {{- include "trinity.labels" $root | nindent 4 }}
+  {{- if or $root.Values.ingress.annotations $ingress.annotations }}
+  annotations:
+    {{- with $root.Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with $ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+spec:
+  {{- if or $ingress.className $root.Values.ingress.className }}
+  ingressClassName: {{ default $root.Values.ingress.className $ingress.className | quote }}
+  {{- end }}
+  {{- if and $ingress.tls $ingress.tls.enabled $ingress.host }}
+  tls:
+    - hosts:
+        - {{ $ingress.host | quote }}
+      secretName: {{ $ingress.tls.secretName | quote }}
+  {{- end }}
+  rules:
+    - {{- if $ingress.host }}
+      host: {{ $ingress.host | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: {{ default "/" $ingress.path | quote }}
+            pathType: {{ default "Prefix" $ingress.pathType }}
+            backend:
+              service:
+                name: {{ $ingress.serviceName }}
+                port:
+                  {{- if kindIs "string" $ingress.servicePort }}
+                  name: {{ $ingress.servicePort | quote }}
+                  {{- else }}
+                  number: {{ $ingress.servicePort }}
+                  {{- end }}
+{{- end }}
+{{- end }}

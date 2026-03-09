@@ -37,7 +37,7 @@ spec:
                   key: VAULT_TOKEN
             {{- end }}
             - name: VAULT_UI
-              value: "false"
+              value: {{ .Values.vault.uiEnabled | quote }}
           securityContext:
             capabilities:
               add: ["IPC_LOCK"]
