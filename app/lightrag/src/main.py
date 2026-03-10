@@ -81,6 +81,38 @@ async def create_document(
     return store.save_document(record)
 
 
+@app.get("/documents", response_model=list[DocumentRecord])
+async def list_documents(
+    status_filter: str | None = Query(default=None, alias="status"),
+    document_type: str | None = Query(default=None, alias="type"),
+    q: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    scope: RequestScope = Depends(require_scope),
+):
+    rows = [document for document in store.list_documents(scope.workspace_id) if _can_access_document(scope, document)]
+
+    if status_filter:
+        rows = [document for document in rows if document.status == status_filter]
+
+    if document_type:
+        rows = [document for document in rows if document.document_type == document_type]
+
+    if q:
+        q_norm = q.strip().lower()
+        if q_norm:
+            rows = [
+                document
+                for document in rows
+                if q_norm in document.filename.lower()
+                or q_norm in document.document_id.lower()
+                or q_norm in (document.source_version or "").lower()
+            ]
+
+    rows.sort(key=lambda item: item.updated_at, reverse=True)
+    return rows[offset : offset + limit]
+
+
 @app.post("/documents/{document_id}/ingest", response_model=DocumentRecord)
 async def ingest_document(
     document_id: str,
@@ -144,7 +176,26 @@ async def document_chunks(
     }
 
 
-@app.get("/knowledge/graph", response_model=KnowledgeGraphResponse)
+@app.delete("/documents/{document_id}")
+async def delete_document(
+    document_id: str,
+    scope: RequestScope = Depends(require_scope),
+):
+    record = _require_document(scope.workspace_id, document_id)
+    _ensure_tenant(scope, record)
+    if not _can_access_document(scope, record):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="OpenClaw mismatch")
+
+    await rag.delete_document(scope.workspace_id, document_id)
+    store.delete_document(scope.workspace_id, document_id)
+    return {
+        "document_id": document_id,
+        "workspace_id": scope.workspace_id,
+        "deleted": True,
+    }
+
+
+@app.get("/knowledge/graph", response_model=KnowledgeGraphResponse, deprecated=True)
 async def knowledge_graph(
     scope: RequestScope = Depends(require_scope),
 ):
@@ -492,3 +543,11 @@ def _require_document(workspace_id: str, document_id: str) -> DocumentRecord:
 def _ensure_tenant(scope: RequestScope, record: DocumentRecord) -> None:
     if record.tenant_id != scope.tenant_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant mismatch")
+
+
+def _can_access_document(scope: RequestScope, record: DocumentRecord) -> bool:
+    if record.tenant_id != scope.tenant_id:
+        return False
+    if scope.openclaw_id is None:
+        return True
+    return record.openclaw_id in {None, scope.openclaw_id}

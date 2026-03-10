@@ -5,33 +5,27 @@
  *
  * 1. POST /__openclaw__/upload
  *    Upload files to the agent workspace (media/inbound/).
- *    Auth: Authorization: Bearer <gateway-token>
+ *    Auth: Authorization: Bearer <gateway-token|user-jwt>
  *    Headers: Content-Type, X-File-Name
  *    Body: raw file bytes
  *    Response: { ok, path, name, size, contentType }
  *
- * 2. GET /__openclaw__/media/<workspace-relative-path>
- *    Serve workspace files over HTTP (for <img src>, A2UI Image, markdown).
- *    Auth: same-origin only (behind nginx reverse proxy).
- *    Serves with correct Content-Type, Cache-Control, path traversal guard.
+ * Note: Media reads are served by nginx at /__openclaw__/media/ in this stack.
  */
 
 import { IncomingMessage, ServerResponse } from "node:http";
 import * as fs from "node:fs/promises";
-import * as fsSync from "node:fs";
 import { createReadStream } from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB per file
-const MAX_SERVE_BYTES = 50 * 1024 * 1024; // 50 MB max file serve (prevents OOM)
+const MAX_SERVE_BYTES = 50 * 1024 * 1024; // 50 MB per file serve
 const UPLOAD_PATH = "/__openclaw__/upload";
 const MEDIA_PREFIX = "/__openclaw__/media/";
 
 // Windows reserved device names to reject in filenames
 const WINDOWS_RESERVED = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)/i;
-
-// ─── MIME type resolution ──────────────────────────────────────────────
 
 const MIME_MAP: Record<string, string> = {
   ".png": "image/png",
@@ -40,27 +34,12 @@ const MIME_MAP: Record<string, string> = {
   ".gif": "image/gif",
   ".webp": "image/webp",
   ".svg": "image/svg+xml",
-  ".ico": "image/x-icon",
   ".bmp": "image/bmp",
   ".tiff": "image/tiff",
   ".tif": "image/tiff",
-  ".pdf": "application/pdf",
-  ".json": "application/json",
-  ".xml": "application/xml",
-  ".csv": "text/csv",
   ".txt": "text/plain",
-  ".md": "text/markdown",
-  ".html": "text/html",
-  ".css": "text/css",
-  ".js": "text/javascript",
-  ".mp3": "audio/mpeg",
-  ".wav": "audio/wav",
-  ".ogg": "audio/ogg",
-  ".mp4": "video/mp4",
-  ".webm": "video/webm",
-  ".zip": "application/zip",
-  ".gz": "application/gzip",
-  ".tar": "application/x-tar",
+  ".json": "application/json",
+  ".pdf": "application/pdf",
 };
 
 function resolveMime(filePath: string): string {
@@ -169,27 +148,88 @@ function resolveWorkspace(api: any): string {
     : workspace.replace(/^~/, process.env.HOME ?? "/home/node");
 }
 
-/** Validate gateway token from Authorization header using timing-safe comparison. */
-function validateAuth(req: IncomingMessage, api: any): boolean {
+function extractBearerToken(req: IncomingMessage): string {
   const authHeader = req.headers["authorization"] ?? "";
-  const token = authHeader.startsWith("Bearer ")
+  return authHeader.startsWith("Bearer ")
     ? authHeader.slice(7).trim()
     : "";
+}
+
+function timingSafeEqualString(a: string, b: string): boolean {
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  if (bufA.length !== bufB.length) {
+    crypto.timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+function base64UrlToBuffer(input: string): Buffer {
+  const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  return Buffer.from(padded, "base64");
+}
+
+function base64ToBase64Url(input: string): string {
+  return input.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function validateGatewayToken(token: string, api: any): boolean {
   const expectedToken =
     api.config?.gateway?.auth?.token ??
     process.env.OPENCLAW_GATEWAY_TOKEN ??
     "";
   if (!token || !expectedToken) return false;
+  return timingSafeEqualString(token, expectedToken);
+}
 
-  // Timing-safe comparison to prevent side-channel attacks
-  const bufToken = Buffer.from(String(token));
-  const bufExpected = Buffer.from(String(expectedToken));
-  if (bufToken.length !== bufExpected.length) {
-    // Still do a comparison to avoid length-based timing leak
-    crypto.timingSafeEqual(bufToken, bufToken);
+function validateSupabaseJwt(token: string): boolean {
+  const secret =
+    process.env.SUPABASE_JWT_SECRET ??
+    process.env.JWT_SECRET ??
+    "";
+  if (!token || !secret) return false;
+
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+
+  const [headerB64, payloadB64, signatureB64] = parts;
+
+  try {
+    const header = JSON.parse(base64UrlToBuffer(headerB64).toString("utf8")) as {
+      alg?: string;
+      typ?: string;
+    };
+    if (header.alg !== "HS256") return false;
+
+    const payload = JSON.parse(base64UrlToBuffer(payloadB64).toString("utf8")) as {
+      exp?: number;
+    };
+    if (typeof payload.exp !== "number") return false;
+    if (Math.floor(Date.now() / 1000) >= payload.exp) return false;
+
+    const signingInput = `${headerB64}.${payloadB64}`;
+    const expectedSig = base64ToBase64Url(
+      crypto.createHmac("sha256", secret).update(signingInput).digest("base64")
+    );
+
+    return timingSafeEqualString(signatureB64, expectedSig);
+  } catch {
     return false;
   }
-  return crypto.timingSafeEqual(bufToken, bufExpected);
+}
+
+/**
+ * Validate Authorization Bearer token.
+ * Accepts either:
+ * - gateway token (internal/system calls)
+ * - user JWT signed by Supabase JWT secret (browser uploads)
+ */
+function validateAuth(req: IncomingMessage, api: any): boolean {
+  const token = extractBearerToken(req);
+  if (!token) return false;
+  return validateGatewayToken(token, api) || validateSupabaseJwt(token);
 }
 
 // ─── Plugin registration ───────────────────────────────────────────────
@@ -201,6 +241,8 @@ export default function register(api: any) {
 
   api.registerHttpRoute({
     path: UPLOAD_PATH,
+    auth: "plugin",
+    match: "exact",
     handler: async (req: IncomingMessage, res: ServerResponse) => {
       // CORS preflight
       if (req.method === "OPTIONS") {
@@ -212,17 +254,17 @@ export default function register(api: any) {
         );
         res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
         res.end();
-        return;
+        return true;
       }
 
       if (req.method !== "POST") {
         jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
-        return;
+        return true;
       }
 
       if (!validateAuth(req, api)) {
         jsonResponse(res, 401, { ok: false, error: "Unauthorized" });
-        return;
+        return true;
       }
 
       // Parse metadata from headers (single decode only)
@@ -243,12 +285,12 @@ export default function register(api: any) {
           ok: false,
           error: err.message ?? "File too large",
         });
-        return;
+        return true;
       }
 
       if (body.length === 0) {
         jsonResponse(res, 400, { ok: false, error: "Empty body" });
-        return;
+        return true;
       }
 
       // Write to workspace/media/inbound/
@@ -263,7 +305,7 @@ export default function register(api: any) {
           ok: false,
           error: "Failed to create upload directory",
         });
-        return;
+        return true;
       }
 
       // Use full UUID for better collision resistance
@@ -276,7 +318,7 @@ export default function register(api: any) {
       // Path traversal guard
       if (!destPath.startsWith(inboundDir)) {
         jsonResponse(res, 400, { ok: false, error: "Invalid filename" });
-        return;
+        return true;
       }
 
       try {
@@ -287,7 +329,7 @@ export default function register(api: any) {
           ok: false,
           error: "Failed to write file",
         });
-        return;
+        return true;
       }
 
       const relativePath = `media/inbound/${safeId}`;
@@ -301,147 +343,143 @@ export default function register(api: any) {
         size: body.length,
         contentType,
       });
+      return true;
     },
   });
 
-  // ── 2. GET /__openclaw__/media/*  (file serving) ──────────────────
-  //
-  // Serves workspace files over HTTP so that:
-  //   - A2UI Image components can display generated images
-  //   - Markdown image syntax in chat renders workspace images
-  //   - Browser <img src> tags work for workspace files
-  //
-  // Auth: same-origin behind nginx. No token required for GET reads
-  // since the endpoint is only reachable via the reverse proxy.
-  // Security: path traversal prevention, symlink rejection, workspace-confined.
+  api.registerHttpRoute({
+    path: MEDIA_PREFIX,
+    auth: "plugin",
+    match: "prefix",
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      if (req.method === "OPTIONS") {
+        res.statusCode = 204;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+        res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+        res.end();
+        return true;
+      }
 
-  api.registerHttpHandler(
-    async (req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
-      const url = new URL(req.url ?? "/", "http://localhost");
-      const pathname = url.pathname;
-
-      // Only handle requests under /__openclaw__/media/
-      if (!pathname.startsWith(MEDIA_PREFIX)) return false;
-
-      // Only GET and HEAD
       if (req.method !== "GET" && req.method !== "HEAD") {
         res.statusCode = 405;
-        res.setHeader("Content-Type", "text/plain; charset=utf-8");
         res.end("Method Not Allowed");
         return true;
       }
 
-      // Extract the relative path after the prefix.
-      // new URL() already decodes percent-encoding, so do NOT double-decode.
-      const rawRelative = pathname.slice(MEDIA_PREFIX.length);
+      if (!validateAuth(req, api)) {
+        jsonResponse(res, 401, { ok: false, error: "Unauthorized" });
+        return true;
+      }
 
-      // Reject empty path
+      const url = new URL(req.url ?? "/", "http://localhost");
+      if (!url.pathname.startsWith(MEDIA_PREFIX)) {
+        return false;
+      }
+
+      const rawRelative = url.pathname.slice(MEDIA_PREFIX.length);
       if (!rawRelative || rawRelative === "/") {
         res.statusCode = 400;
-        res.setHeader("Content-Type", "text/plain; charset=utf-8");
         res.end("Missing file path");
         return true;
       }
 
-      // Path traversal guard: reject ".." segments, absolute paths, null bytes
-      const segments = rawRelative.split("/");
+      let relative = rawRelative.replace(/^\/+/, "");
+      if (relative.startsWith("media/")) {
+        relative = relative.substring("media/".length);
+      }
       if (
-        segments.some((s) => s === ".." || s === ".") ||
-        rawRelative.includes("\x00") ||
-        path.isAbsolute(rawRelative)
+        relative.includes("\x00") ||
+        path.isAbsolute(relative) ||
+        relative.split("/").some((s) => s === "." || s === "..")
       ) {
         res.statusCode = 400;
-        res.setHeader("Content-Type", "text/plain; charset=utf-8");
         res.end("Invalid path");
         return true;
       }
 
-      // Resolve to absolute path within workspace
       const resolvedWorkspace = resolveWorkspace(api);
-      const filePath = path.join(resolvedWorkspace, rawRelative);
+      const mediaRoot = path.join(resolvedWorkspace, "media");
 
-      // Ensure the resolved path stays within the workspace (realpath check)
-      try {
-        const realPath = await fs.realpath(filePath);
-        if (!realPath.startsWith(resolvedWorkspace)) {
-          log.warn(
-            `media-serve: path escaped workspace: ${rawRelative} -> ${realPath}`
-          );
-          res.statusCode = 403;
-          res.setHeader("Content-Type", "text/plain; charset=utf-8");
-          res.end("Forbidden");
-          return true;
+      const candidateRoots = [mediaRoot, resolvedWorkspace];
+      let resolvedPath = "";
+      for (const root of candidateRoots) {
+        const candidate = path.resolve(root, relative);
+        const prefix = `${root}${path.sep}`;
+        if (candidate === root || candidate.startsWith(prefix)) {
+          resolvedPath = candidate;
+          break;
         }
+      }
+      if (!resolvedPath) {
+        res.statusCode = 403;
+        res.end("Forbidden");
+        return true;
+      }
 
-        // Reject symlinks (lstat the original path)
-        const lstat = await fs.lstat(filePath);
+      try {
+        let lstat;
+        try {
+          lstat = await fs.lstat(path.resolve(mediaRoot, relative));
+          resolvedPath = path.resolve(mediaRoot, relative);
+        } catch (err: any) {
+          if (err.code !== "ENOENT") throw err;
+          lstat = await fs.lstat(path.resolve(resolvedWorkspace, relative));
+          resolvedPath = path.resolve(resolvedWorkspace, relative);
+        }
         if (lstat.isSymbolicLink()) {
           res.statusCode = 403;
-          res.setHeader("Content-Type", "text/plain; charset=utf-8");
           res.end("Forbidden");
           return true;
         }
-
         if (!lstat.isFile()) {
           res.statusCode = 404;
-          res.setHeader("Content-Type", "text/plain; charset=utf-8");
           res.end("Not found");
           return true;
         }
-
-        // Reject files larger than MAX_SERVE_BYTES to prevent OOM
         if (lstat.size > MAX_SERVE_BYTES) {
           res.statusCode = 413;
-          res.setHeader("Content-Type", "text/plain; charset=utf-8");
           res.end("File too large");
           return true;
         }
 
-        // Serve the file using streaming to avoid loading entire file into memory
-        const mime = resolveMime(realPath);
-
+        const mime = resolveMime(resolvedPath);
         res.statusCode = 200;
         res.setHeader("Content-Type", mime);
-        res.setHeader("Content-Length", lstat.size.toString());
-        // Cache for 5 minutes (generated images are immutable once created)
-        res.setHeader("Cache-Control", "public, max-age=300");
-        // CORS for same-origin <img> requests
+        res.setHeader("Content-Length", String(lstat.size));
+        res.setHeader("Cache-Control", "no-cache");
         res.setHeader("Access-Control-Allow-Origin", "*");
 
         if (req.method === "HEAD") {
           res.end();
-        } else {
-          // Use streaming reads to prevent memory blow-up on large files
-          const stream = createReadStream(realPath);
-          stream.on("error", (streamErr) => {
-            log.error(`media-serve: stream error ${rawRelative}: ${streamErr.message}`);
-            if (!res.headersSent) {
-              res.statusCode = 500;
-              res.end("Internal error");
-            } else {
-              res.end();
-            }
-          });
-          stream.pipe(res);
+          return true;
         }
+
+        const stream = createReadStream(resolvedPath);
+        stream.on("error", (err) => {
+          log.error(`file-upload: media stream error ${relative}: ${err.message}`);
+          if (!res.headersSent) {
+            res.statusCode = 500;
+            res.end("Internal error");
+          } else {
+            res.end();
+          }
+        });
+        stream.pipe(res);
         return true;
       } catch (err: any) {
         if (err.code === "ENOENT") {
           res.statusCode = 404;
-          res.setHeader("Content-Type", "text/plain; charset=utf-8");
           res.end("Not found");
           return true;
         }
-        log.error(`media-serve: error serving ${rawRelative}: ${err.message}`);
+        log.error(`file-upload: media serve failed ${relative}: ${err.message}`);
         res.statusCode = 500;
-        res.setHeader("Content-Type", "text/plain; charset=utf-8");
         res.end("Internal error");
         return true;
       }
-    }
-  );
+    },
+  });
 
-  log.info(
-    "file-upload: registered /__openclaw__/upload + /__openclaw__/media/ endpoints"
-  );
+  log.info("file-upload: registered /__openclaw__/upload + /__openclaw__/media/ endpoints");
 }

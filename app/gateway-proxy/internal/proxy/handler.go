@@ -25,11 +25,28 @@ func NewHandler(jwtSecret []byte, resolver *resolver.Resolver) *Handler {
 }
 
 // ServeHTTP implements http.Handler. It:
-//  1. Extracts and validates the JWT
-//  2. Gets the openclawId from query param or header
-//  3. Resolves the backend for that OpenClaw instance
-//  4. Routes to WebSocket or HTTP proxy
+//  1. Handles CORS preflight (OPTIONS) without auth
+//  2. Extracts and validates the JWT
+//  3. Gets the openclawId from query param or header
+//  4. Resolves the backend for that OpenClaw instance
+//  5. Routes to WebSocket or HTTP proxy
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Handle CORS preflight requests. Browsers send OPTIONS without
+	// credentials before cross-origin POST/PUT/DELETE with custom headers.
+	if r.Method == http.MethodOptions {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			origin = "*"
+		}
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-File-Name, X-OpenClaw-Id")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	// Extract JWT
 	tokenString := auth.ExtractToken(r)
 	if tokenString == "" {

@@ -107,6 +107,18 @@ class LightRAGAdapter:
             else:
                 await asyncio.to_thread(rag.insert, text)
 
+    async def delete_document(self, workspace_id: str, document_id: str) -> None:
+        rag = await self.ensure_workspace(workspace_id)
+        if rag is None:
+            return
+
+        if hasattr(rag, "adelete_by_doc_id"):
+            await rag.adelete_by_doc_id(document_id)
+            return
+
+        if hasattr(rag, "delete_by_doc_id"):
+            await asyncio.to_thread(rag.delete_by_doc_id, document_id)
+
     async def query(
         self,
         workspace_id: str,

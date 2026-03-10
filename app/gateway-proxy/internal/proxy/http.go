@@ -9,10 +9,22 @@ import (
 	"trinity/gateway-proxy/internal/resolver"
 )
 
+// setCORSHeaders sets CORS response headers for cross-origin requests.
+func setCORSHeaders(w http.ResponseWriter, r *http.Request) {
+	origin := r.Header.Get("Origin")
+	if origin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+	}
+}
+
 // HandleHTTP proxies an HTTP request to the upstream gateway pod using
 // httputil.ReverseProxy. It injects the per-user gateway token as the
 // Authorization header and copies all other headers.
 func HandleHTTP(w http.ResponseWriter, r *http.Request, backend *resolver.Backend) {
+	// Set CORS headers so browser accepts the response
+	setCORSHeaders(w, r)
+
 	target := &url.URL{
 		Scheme: "http",
 		Host:   fmt.Sprintf("%s:%d", backend.Host, backend.Port),

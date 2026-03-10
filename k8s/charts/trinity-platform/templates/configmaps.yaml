@@ -411,6 +411,7 @@ data:
 
     echo "[vault-init] Writing secrets..."
 
+    # ── supabase (jwt, anon key, postgres password) ──
     if validate_secret "SUPABASE_JWT_SECRET" "$SUPABASE_JWT_SECRET" && \
        validate_secret "SUPABASE_ANON_KEY" "$SUPABASE_ANON_KEY" && \
        validate_secret "SUPABASE_POSTGRES_PASSWORD" "$SUPABASE_POSTGRES_PASSWORD"; then
@@ -421,19 +422,59 @@ data:
         2>&1 || echo "[vault-init] WARN: failed to write supabase secrets"
     fi
 
+    # ── keycloak (admin password, client secret, authentik client secret) ──
     if validate_secret "KEYCLOAK_ADMIN_PASSWORD" "$KEYCLOAK_ADMIN_PASSWORD"; then
       vault kv put secret/trinity/keycloak \
         admin="$KEYCLOAK_ADMIN_PASSWORD" \
         client_secret="${KEYCLOAK_CLIENT_SECRET:-}" \
+        authentik_client_secret="${AUTHENTIK_CLIENT_SECRET:-}" \
         2>&1 || echo "[vault-init] WARN: failed to write keycloak secrets"
     fi
 
+    # ── superadmin (allowlist, enabled flag) ──
     vault kv put secret/trinity/superadmin \
       allowlist="${SUPERADMIN_ALLOWLIST:-}" \
       enabled="${ENABLE_DEFAULT_SUPERADMIN:-false}" \
+      email="${DEFAULT_SUPERADMIN_EMAIL:-admin@trinity.work}" \
+      password="${DEFAULT_SUPERADMIN_PASSWORD:-}" \
       2>&1 || echo "[vault-init] WARN: failed to write superadmin config"
 
-    echo "[vault-init] Secrets configured at $VAULT_ADDR"
+    # ── orchestrator (service token) ──
+    vault kv put secret/trinity/orchestrator \
+      service_token="${ORCHESTRATOR_SERVICE_TOKEN:-}" \
+      2>&1 || echo "[vault-init] WARN: failed to write orchestrator secrets"
+
+    # ── grafana (admin password) ──
+    vault kv put secret/trinity/grafana \
+      password="${GRAFANA_PASSWORD:-}" \
+      2>&1 || echo "[vault-init] WARN: failed to write grafana secrets"
+
+    # ── lightrag (internal token, LLM key, embedding key) ──
+    vault kv put secret/trinity/lightrag \
+      internal_token="${LIGHTRAG_INTERNAL_TOKEN:-}" \
+      llm_api_key="${LIGHTRAG_LLM_API_KEY:-}" \
+      embedding_api_key="${LIGHTRAG_EMBEDDING_API_KEY:-}" \
+      2>&1 || echo "[vault-init] WARN: failed to write lightrag secrets"
+
+    # ── copilot / zen ──
+    vault kv put secret/trinity/copilot \
+      zen_api_key="${ZEN_API_KEY:-}" \
+      2>&1 || echo "[vault-init] WARN: failed to write copilot secrets"
+
+    # ── openclaw (POE API key + future per-user skill keys) ──
+    # Only write if value is non-empty (preserve manually-seeded values)
+    if [ -n "$POE_API_KEY" ]; then
+      vault kv put secret/trinity/openclaw \
+        poe_api_key="$POE_API_KEY" \
+        2>&1 || echo "[vault-init] WARN: failed to write openclaw secrets"
+    else
+      # Ensure path exists with at least a placeholder (first install only)
+      vault kv get secret/trinity/openclaw >/dev/null 2>&1 \
+        || vault kv put secret/trinity/openclaw poe_api_key="" 2>&1 \
+        || echo "[vault-init] WARN: failed to init openclaw path"
+    fi
+
+    echo "[vault-init] All secrets configured at $VAULT_ADDR"
 ---
 # ─── Keycloak IdP bootstrap scripts ───────────────────────────────────────
 apiVersion: v1

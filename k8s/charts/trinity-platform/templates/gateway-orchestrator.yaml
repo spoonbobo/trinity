@@ -84,6 +84,11 @@ spec:
             - name: STORAGE_CLASS
               value: {{ .Values.global.storageClass | quote }}
             {{- end }}
+            - name: POE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: POE_API_KEY
           volumeMounts:
             - name: openclaw-chart
               mountPath: /charts/openclaw-instance

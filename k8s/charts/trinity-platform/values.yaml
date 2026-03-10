@@ -23,6 +23,10 @@ secrets:
   # Note: OPENCLAW_GATEWAY_TOKEN is now per-user, managed by the orchestrator.
   # This is the orchestrator's internal service token for inter-service auth.
   orchestratorServiceToken: ""
+  # POE API key for nano-banana-2-poe and other POE-backed skills
+  poeApiKey: ""
+  # Authentik client secret (when Keycloak Authentik federation is enabled)
+  authentikClientSecret: ""
 
 # ─── URLs ──────────────────────────────────────────────────────────────────
 urls:

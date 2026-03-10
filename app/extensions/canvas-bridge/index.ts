@@ -1,6 +1,8 @@
 const A2UI_MARKER = "__A2UI__";
 
 export default function register(api: any) {
+  const log = api.logger;
+
   api.registerTool({
     name: "canvas_ui",
     description: `Render visual content in the Canvas panel. MANDATORY for any UI output — never describe UI in chat text. Pass A2UI v0.8 JSONL as the 'jsonl' parameter: one JSON object per line. You MUST include a surfaceUpdate (with components) and a beginRendering (with root id). See the system prompt for the full component catalog and examples.`,
@@ -16,6 +18,8 @@ export default function register(api: any) {
       required: ["jsonl"],
     },
     async execute(_id: string, params: { jsonl: string }) {
+      log.info(`canvas-bridge: canvas_ui called (bytes=${params?.jsonl?.length ?? 0})`);
+
       // Defensive validation: reject empty or missing jsonl
       if (!params.jsonl || typeof params.jsonl !== "string" || params.jsonl.trim().length === 0) {
         return {
@@ -42,6 +46,7 @@ export default function register(api: any) {
 
       // Validate that each line is parseable JSON
       const lines = params.jsonl.trim().split("\n").filter(l => l.trim().length > 0);
+      log.info(`canvas-bridge: validating ${lines.length} JSONL line(s)`);
       for (let i = 0; i < lines.length; i++) {
         try {
           JSON.parse(lines[i]);
@@ -67,4 +72,6 @@ export default function register(api: any) {
       };
     },
   });
+
+  log.info("canvas-bridge: registered canvas_ui tool");
 }

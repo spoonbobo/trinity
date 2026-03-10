@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
@@ -49,6 +50,10 @@ func sanitizeName(name string) string {
 	return strings.Trim(s, "-")
 }
 
+func boolPtr(v bool) *bool {
+	return &v
+}
+
 // ResourceName returns the canonical K8s resource name for an OpenClaw instance.
 func ResourceName(name string) string {
 	return fmt.Sprintf("openclaw-%s", sanitizeName(name))
@@ -67,6 +72,13 @@ func resourceLabels(openclawID, name string) map[string]string {
 
 // CreateOpenClawSecret creates a Kubernetes Secret containing the gateway token.
 func (c *Client) CreateOpenClawSecret(ctx context.Context, oc *db.OpenClaw, resName string) error {
+	stringData := map[string]string{
+		"OPENCLAW_GATEWAY_TOKEN": oc.GatewayToken,
+	}
+	if poeAPIKey := strings.TrimSpace(os.Getenv("POE_API_KEY")); poeAPIKey != "" {
+		stringData["POE_API_KEY"] = poeAPIKey
+	}
+
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      resName,
@@ -74,9 +86,7 @@ func (c *Client) CreateOpenClawSecret(ctx context.Context, oc *db.OpenClaw, resN
 			Labels:    resourceLabels(oc.ID, oc.Name),
 		},
 		Type: corev1.SecretTypeOpaque,
-		StringData: map[string]string{
-			"OPENCLAW_GATEWAY_TOKEN": oc.GatewayToken,
-		},
+		StringData: stringData,
 	}
 	_, err := c.clientset.CoreV1().Secrets(c.namespace).Create(ctx, secret, metav1.CreateOptions{})
 	if err != nil && !errors.IsAlreadyExists(err) {
@@ -252,6 +262,16 @@ func (c *Client) CreateOpenClawDeployment(ctx context.Context, oc *db.OpenClaw, 
 									},
 								},
 								{Name: "NODE_ENV", Value: "production"},
+								{
+									Name: "POE_API_KEY",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{Name: resName},
+											Key:                  "POE_API_KEY",
+											Optional:             boolPtr(true),
+										},
+									},
+								},
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "data", MountPath: "/home/node/.openclaw"},

@@ -246,7 +246,7 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
               // Extract displayable text from content (may be String or List of blocks)
               var content = _extractContent(msg['content']);
               // #10: Replace raw A2UI JSONL in history with friendly message
-              if (content.startsWith('__A2UI__')) {
+              if (content.contains('__A2UI__')) {
                 content = 'Canvas updated';
               }
               // Extract timestamp from history (epoch ms or ISO string)
@@ -391,6 +391,9 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
       } else {
         relative = raw;
       }
+      if (relative.startsWith('media/')) {
+        relative = relative.substring('media/'.length);
+      }
       urls.add('/__openclaw__/media/$relative');
     }
     return urls;
@@ -407,10 +410,12 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
       for (final block in contentList) {
         if (block is! Map<String, dynamic>) continue;
         final text = block['text'] as String?;
-        if (text != null && text.startsWith('__A2UI__')) {
-          _lastCanvasSurface = text;
+        if (text != null && text.contains('__A2UI__')) {
+          final payload = _extractA2UIText(text);
+          if (payload == null) continue;
+          _lastCanvasSurface = payload;
           // Also render it to the canvas so the last surface shows on load
-          _handleA2UIToolResult(text);
+          _handleA2UIToolResult(payload);
           return;
         }
       }
@@ -654,8 +659,9 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
 
         if (phase == 'end' || phase == 'result') {
           // Tool finished — check for A2UI marker
-          if (result.startsWith('__A2UI__')) {
-            _handleA2UIToolResult(result);
+          final a2uiPayload = _extractA2UIText(result);
+          if (a2uiPayload != null) {
+            _handleA2UIToolResult(a2uiPayload);
             setState(() {
               _updateLastToolEntry('Canvas updated', toolCallId: toolCallId);
             });
@@ -699,8 +705,9 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
         final result = dataMap?['result']?.toString() ??
             dataMap?['output']?.toString() ??
             '';
-        if (result.startsWith('__A2UI__')) {
-          _handleA2UIToolResult(result);
+        final a2uiPayload = _extractA2UIText(result);
+        if (a2uiPayload != null) {
+          _handleA2UIToolResult(a2uiPayload);
           setState(() {
             _updateLastToolEntry('Canvas updated', toolCallId: toolCallId);
           });
@@ -806,10 +813,14 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
         for (final block in contentList) {
           if (block is! Map<String, dynamic>) continue;
           final text = block['text'] as String?;
-          if (text != null && text.startsWith('__A2UI__') && text != _lastCanvasSurface) {
-            _lastCanvasSurface = text;
+          if (text != null && text.contains('__A2UI__')) {
+            final payload = _extractA2UIText(text);
+            if (payload == null || payload == _lastCanvasSurface) {
+              continue;
+            }
+            _lastCanvasSurface = payload;
             if (kDebugMode) debugPrint('[Canvas] Found A2UI in history, rendering surface');
-            _handleA2UIToolResult(text);
+            _handleA2UIToolResult(payload);
             setState(() {
               if (_entries.isEmpty || _entries.last.role != 'tool' || !_entries.last.isStreaming) {
                 _entries.add(ChatEntry(
@@ -833,6 +844,12 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
     } catch (e) {
       if (kDebugMode) debugPrint('[Canvas] poll error: $e');
     }
+  }
+
+  String? _extractA2UIText(String raw) {
+    final markerIndex = raw.indexOf('__A2UI__');
+    if (markerIndex < 0) return null;
+    return raw.substring(markerIndex);
   }
 
   void _handleA2UIToolResult(String result) {
@@ -1004,7 +1021,13 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
         if (entry.content.isEmpty && !entry.isStreaming) {
           return const SizedBox.shrink();
         }
-        return _AssistantBubble(entry: entry, isNewSender: isNewSender);
+        final authState = ref.read(authClientProvider).state;
+        return _AssistantBubble(
+          entry: entry,
+          isNewSender: isNewSender,
+          authToken: authState.token,
+          openclawId: authState.activeOpenClawId,
+        );
       case 'tool':
         return _ToolCard(entry: entry);
       default:
@@ -1293,7 +1316,14 @@ class _UserBubbleState extends State<_UserBubble> {
 class _AssistantBubble extends StatefulWidget {
   final ChatEntry entry;
   final bool isNewSender;
-  const _AssistantBubble({required this.entry, this.isNewSender = true});
+  final String? authToken;
+  final String? openclawId;
+  const _AssistantBubble({
+    required this.entry,
+    this.isNewSender = true,
+    this.authToken,
+    this.openclawId,
+  });
 
   @override
   State<_AssistantBubble> createState() => _AssistantBubbleState();
@@ -1315,6 +1345,11 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
 
   /// 2. Absolute workspace paths:
   ///    /home/node/.openclaw/workspace/<relative-path>.png
+  static final _backtickedAbsWorkspaceRe = RegExp(
+    r'`/home/node/\.openclaw/workspace/([^`\s)\]]+' + _imgExts + r')`',
+    caseSensitive: false,
+  );
+
   static final _absWorkspaceRe = RegExp(
     r'(?<!\]\()' // not preceded by ](
     r'/home/node/\.openclaw/workspace/([^\s)\]`]+' + _imgExts + ')',
@@ -1338,10 +1373,24 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
   String _enrichContentWithImages(String content) {
     var result = content;
 
+    String normalizeRelative(String input) {
+      final trimmed = input.replaceFirst(RegExp(r'^/+'), '');
+      return trimmed.startsWith('media/')
+          ? trimmed.substring('media/'.length)
+          : trimmed;
+    }
+
+    // Pass 0: Convert backticked absolute workspace paths to markdown images.
+    // Without this, replacements can become `![image](...)` and render as code.
+    result = result.replaceAllMapped(_backtickedAbsWorkspaceRe, (m) {
+      final relative = normalizeRelative(m.group(1)!);
+      return '![image](/__openclaw__/media/$relative)';
+    });
+
     // Pass 1: Convert absolute workspace paths to media URLs
     result = result.replaceAllMapped(_absWorkspaceRe, (m) {
       if (m.start > 0 && result[m.start - 1] == '(') return m.group(0)!;
-      final relative = m.group(1)!;
+      final relative = normalizeRelative(m.group(1)!);
       return '![image](/__openclaw__/media/$relative)';
     });
 
@@ -1349,9 +1398,10 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
     result = result.replaceAllMapped(_mediaTokenRe, (m) {
       final raw = m.group(1)!;
       // Strip workspace prefix if present
-      final relative = raw.startsWith('/home/node/.openclaw/workspace/')
+      final relativeRaw = raw.startsWith('/home/node/.openclaw/workspace/')
           ? raw.substring('/home/node/.openclaw/workspace/'.length)
           : raw;
+      final relative = normalizeRelative(relativeRaw);
       return '![image](/__openclaw__/media/$relative)';
     });
 
@@ -1454,7 +1504,11 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
                         ),
                       ),
                       imageBuilder: (uri, title, alt) {
-                        return _ChatImage(url: uri.toString());
+                        return _ChatImage(
+                          url: uri.toString(),
+                          authToken: widget.authToken,
+                          openclawId: widget.openclawId,
+                        );
                       },
                       onTapLink: (text, href, title) {
                         if (href != null) {
@@ -1785,7 +1839,9 @@ class _SystemMessage extends StatelessWidget {
 /// Rendered image in chat with hover-only copy/download toolbar.
 class _ChatImage extends StatefulWidget {
   final String url;
-  const _ChatImage({required this.url});
+  final String? authToken;
+  final String? openclawId;
+  const _ChatImage({required this.url, this.authToken, this.openclawId});
 
   @override
   State<_ChatImage> createState() => _ChatImageState();
@@ -1795,15 +1851,29 @@ class _ChatImageState extends State<_ChatImage> {
   bool _hovering = false;
   bool _copied = false;
 
+  String get _resolvedUrl {
+    var base = widget.url.replaceFirst('/__openclaw__/media/media/', '/__openclaw__/media/');
+    if (!base.startsWith('/__openclaw__/media/')) return base;
+    final uri = Uri.parse(base);
+    final qp = Map<String, String>.from(uri.queryParameters);
+    if (!qp.containsKey('openclaw') && (widget.openclawId?.isNotEmpty ?? false)) {
+      qp['openclaw'] = widget.openclawId!;
+    }
+    if (!qp.containsKey('token') && (widget.authToken?.isNotEmpty ?? false)) {
+      qp['token'] = widget.authToken!;
+    }
+    return uri.replace(queryParameters: qp.isEmpty ? null : qp).toString();
+  }
+
   void _downloadImage() {
-    final filename = widget.url.split('/').last.split('?').first;
-    html.AnchorElement(href: widget.url)
+    final filename = _resolvedUrl.split('/').last.split('?').first;
+    html.AnchorElement(href: _resolvedUrl)
       ..setAttribute('download', filename.isNotEmpty ? filename : 'image.png')
       ..click();
   }
 
   void _copyImageUrl() {
-    Clipboard.setData(ClipboardData(text: widget.url)).then((_) {
+    Clipboard.setData(ClipboardData(text: _resolvedUrl)).then((_) {
       if (!mounted) return;
       setState(() => _copied = true);
       Future.delayed(const Duration(seconds: 2), () {
@@ -1823,7 +1893,7 @@ class _ChatImageState extends State<_ChatImage> {
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 400, maxHeight: 300),
             child: Image.network(
-              widget.url,
+              _resolvedUrl,
               fit: BoxFit.contain,
               loadingBuilder: (_, child, progress) {
                 if (progress == null) return child;

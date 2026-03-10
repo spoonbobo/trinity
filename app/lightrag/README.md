@@ -63,7 +63,11 @@ Behavior:
 - `POST /documents/{document_id}/ingest`
 - `GET /documents/{document_id}/status`
 - `GET /documents/{document_id}/chunks`
-- `GET /knowledge/graph`
+- `GET /graph/label/list`
+- `GET /graph/label/popular`
+- `GET /graph/label/search`
+- `GET /graphs` (canonical graph endpoint)
+- `GET /knowledge/graph` (legacy, deprecated)
 - `POST /retrieval/search`
 - `POST /retrieval/compare`
 - `POST /tender-check/runs`

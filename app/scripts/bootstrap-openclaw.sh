@@ -37,8 +37,56 @@ seed_dir_if_empty() {
   fi
 }
 
-seed_dir_if_empty "$SEED_ROOT/skills" "$OPENCLAW_HOME/skills"
+sync_managed_extension() {
+  local id="$1"
+  local src="$SEED_ROOT/extensions/$id"
+  local dst="$OPENCLAW_HOME/extensions/$id"
+
+  if [ ! -d "$src" ]; then
+    return
+  fi
+
+  if ! mkdir -p "$OPENCLAW_HOME/extensions"; then
+    echo "[bootstrap] ERROR: Failed to create extensions directory" >&2
+    return 1
+  fi
+
+  rm -rf "$dst"
+  cp -a "$src" "$dst"
+  echo "[bootstrap] Synced managed extension: $id"
+}
+
+sync_managed_skills() {
+  local src_root="$SEED_ROOT/skills"
+  local dst_root="$OPENCLAW_HOME/skills"
+
+  if [ ! -d "$src_root" ]; then
+    return
+  fi
+
+  if ! mkdir -p "$dst_root"; then
+    echo "[bootstrap] ERROR: Failed to create skills directory" >&2
+    return 1
+  fi
+
+  local count=0
+  for src in "$src_root"/*; do
+    [ -d "$src" ] || continue
+    local id
+    id="$(basename "$src")"
+    local dst="$dst_root/$id"
+    rm -rf "$dst"
+    cp -a "$src" "$dst"
+    count=$((count + 1))
+  done
+
+  echo "[bootstrap] Synced managed skills: $count"
+}
+
+sync_managed_skills
 seed_dir_if_empty "$SEED_ROOT/cron-templates" "$OPENCLAW_HOME/cron-templates"
+sync_managed_extension "canvas-bridge"
+sync_managed_extension "file-upload"
 
 if ! mkdir -p "$OPENCLAW_HOME/workspace" "$OPENCLAW_HOME/workspace/memory"; then
   echo "[bootstrap] ERROR: Failed to create workspace directories" >&2

@@ -42,15 +42,18 @@ RUN mkdir -p /home/node/.cache && \
       cp -r /root/.cache/ms-playwright /home/node/.cache/ms-playwright; \
     fi
 
-RUN mkdir -p /home/node/.openclaw/extensions/canvas-bridge && chown -R node:node /home/node/.openclaw /home/node/.cache
+RUN mkdir -p /home/node/.openclaw/extensions/canvas-bridge /home/node/.openclaw/extensions/file-upload && chown -R node:node /home/node/.openclaw /home/node/.cache
 
 COPY --chown=node:node skills/ /opt/trinity-seed/skills/
 COPY --chown=node:node cron-templates/ /opt/trinity-seed/cron-templates/
 COPY --chown=node:node workspace-seed/ /opt/trinity-seed/workspace/
+COPY --chown=node:node extensions/canvas-bridge/ /opt/trinity-seed/extensions/canvas-bridge/
+COPY --chown=node:node extensions/file-upload/ /opt/trinity-seed/extensions/file-upload/
 COPY --chown=node:node scripts/bootstrap-openclaw.sh /usr/local/bin/bootstrap-openclaw.sh
 RUN chmod +x /usr/local/bin/bootstrap-openclaw.sh
 
 COPY --chown=node:node extensions/canvas-bridge/ /home/node/.openclaw/extensions/canvas-bridge/
+COPY --chown=node:node extensions/file-upload/ /home/node/.openclaw/extensions/file-upload/
 
 USER node
 WORKDIR /home/node

@@ -79,9 +79,12 @@ class A2UISurfacesNotifier extends StateNotifier<A2UIState> {
             update.surfaceId,
             () => A2UISurface(surfaceId: update.surfaceId),
           );
+          final updatedIds = <String>[];
           for (final comp in update.components) {
             surface.components[comp.id] = comp;
+            updatedIds.add(comp.id);
           }
+          _ensureRenderableRoot(surface, preferredIds: updatedIds);
           needsRebuild = true;
         } catch (e) {
           debugPrint('[A2UI] bad surfaceUpdate: $e');
@@ -142,6 +145,31 @@ class A2UISurfacesNotifier extends StateNotifier<A2UIState> {
 
     if (needsRebuild) {
       state = state.copyWith(surfaces: surfaces);
+    }
+  }
+
+  void _ensureRenderableRoot(A2UISurface surface, {List<String>? preferredIds}) {
+    final currentRoot = surface.rootId;
+    if (currentRoot != null && surface.components.containsKey(currentRoot)) {
+      return;
+    }
+
+    if (surface.components.containsKey('root')) {
+      surface.rootId = 'root';
+      return;
+    }
+
+    if (preferredIds != null) {
+      for (final id in preferredIds) {
+        if (surface.components.containsKey(id)) {
+          surface.rootId = id;
+          return;
+        }
+      }
+    }
+
+    if (surface.components.isNotEmpty) {
+      surface.rootId = surface.components.keys.first;
     }
   }
 
