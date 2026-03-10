@@ -190,6 +190,11 @@ class _AdminCopilotTabState extends ConsumerState<AdminCopilotTab> {
     }
   }
 
+  Future<void> _refreshChatSession() async {
+    if (_loading || _sending) return;
+    await _loadMessages();
+  }
+
   Future<void> _refreshStatusSilently() async {
     final authState = ref.read(authClientProvider).state;
     final token = authState.token;
@@ -468,6 +473,36 @@ class _AdminCopilotTabState extends ConsumerState<AdminCopilotTab> {
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: (_loading || _sending) ? null : _refreshChatSession,
+                child: MouseRegion(
+                  cursor: (_loading || _sending)
+                      ? SystemMouseCursors.basic
+                      : SystemMouseCursors.click,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.refresh,
+                        size: 14,
+                        color: (_loading || _sending)
+                            ? t.fgDisabled
+                            : t.accentPrimary,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'refresh chat',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: (_loading || _sending)
+                              ? t.fgDisabled
+                              : t.accentPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -572,46 +607,7 @@ class _AdminCopilotTabState extends ConsumerState<AdminCopilotTab> {
           const SizedBox(height: 4),
           Text('type a message below',
             style: TextStyle(fontSize: 10, color: t.fgPlaceholder)),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 12,
-            runSpacing: 6,
-            alignment: WrapAlignment.center,
-            children: [
-              _templateChip('openclaw gateway status', theme, t),
-              _templateChip('openclaw dashboard', theme, t),
-              _templateChip('openclaw channels list', theme, t),
-              _templateChip('openclaw channels status', theme, t),
-              _templateChip('openclaw channels capabilities --channel <name>', theme, t),
-              _templateChip('openclaw channels login --channel <name>', theme, t),
-              _templateChip('openclaw doctor', theme, t),
-              _templateChip('openclaw logs --follow', theme, t),
-            ],
-          ),
         ],
-      ),
-    );
-  }
-
-  Widget _templateChip(String command, ThemeData theme, ShellTokens t) {
-    return GestureDetector(
-      onTap: () {
-        Clipboard.setData(ClipboardData(text: command));
-        _controller.text = 'Explain when to use: `$command` and expected output.';
-        _focusNode.requestFocus();
-        ToastService.showInfo(context, 'command copied: $command');
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          border: Border.all(color: t.border, width: 0.5),
-          borderRadius: kShellBorderRadiusSm,
-          color: t.surfaceBase,
-        ),
-        child: Text(
-          command,
-          style: theme.textTheme.labelSmall?.copyWith(color: t.accentPrimary),
-        ),
       ),
     );
   }

@@ -83,6 +83,9 @@ TerminalProxyClient createScopedTerminalClient(WidgetRef ref) {
 /// Active session key — defaults to 'main'.
 final activeSessionProvider = StateProvider<String>((ref) => 'main');
 
+/// Increment this value to force chat history reload for active session.
+final chatRefreshTickProvider = StateProvider<int>((ref) => 0);
+
 /// The currently selected OpenClaw instance ID.
 final activeOpenClawProvider = StateProvider<String?>((ref) => null);
 

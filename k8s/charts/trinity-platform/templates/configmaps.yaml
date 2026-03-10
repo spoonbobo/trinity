@@ -306,6 +306,48 @@ data:
       allow_structured_metadata: false
 {{- end }}
 ---
+# ─── Fluentd configuration ────────────────────────────────────────────────
+{{- if .Values.fluentd.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluentd-config
+  namespace: {{ include "trinity.namespace" . }}
+  labels:
+    {{- include "trinity.labels" . | nindent 4 }}
+data:
+  fluent.conf: |
+    <source>
+      @type tail
+      @id in_tail_container_logs
+      path /var/log/containers/*.log
+      exclude_path ["/var/log/containers/fluentd-*.log"]
+      pos_file /fluentd/log/fluentd-containers.log.pos
+      tag kube.*
+      read_from_head false
+      <parse>
+        @type json
+        time_key time
+        time_type string
+        time_format %Y-%m-%dT%H:%M:%S.%N%:z
+      </parse>
+    </source>
+
+    <match kube.**>
+      @type loki
+      url "http://loki:3100"
+      extra_labels {"cluster":"trinity","job":"fluentd"}
+      line_format json
+      flush_interval 10s
+      <buffer>
+        @type memory
+        flush_interval 10s
+        retry_forever true
+        chunk_limit_size 2m
+      </buffer>
+    </match>
+{{- end }}
+---
 # ─── Keycloak realm import ─────────────────────────────────────────────────
 apiVersion: v1
 kind: ConfigMap
@@ -463,14 +505,15 @@ data:
 
     # ── openclaw (POE API key + future per-user skill keys) ──
     # Only write if value is non-empty (preserve manually-seeded values)
-    if [ -n "$POE_API_KEY" ]; then
+    if [ -n "$POE_API_KEY" ] || [ -n "$BRAVE_API_KEY" ]; then
       vault kv put secret/trinity/openclaw \
         poe_api_key="$POE_API_KEY" \
+        brave_api_key="$BRAVE_API_KEY" \
         2>&1 || echo "[vault-init] WARN: failed to write openclaw secrets"
     else
       # Ensure path exists with at least a placeholder (first install only)
       vault kv get secret/trinity/openclaw >/dev/null 2>&1 \
-        || vault kv put secret/trinity/openclaw poe_api_key="" 2>&1 \
+        || vault kv put secret/trinity/openclaw poe_api_key="" brave_api_key="" 2>&1 \
         || echo "[vault-init] WARN: failed to init openclaw path"
     fi
 

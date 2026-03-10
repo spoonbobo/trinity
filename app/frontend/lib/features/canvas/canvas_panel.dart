@@ -617,13 +617,6 @@ class _ModeToggle extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           _ModeButton(
-            label: 'a2ui',
-            isSelected: currentMode == CanvasMode.a2ui,
-            onTap: () => onModeChanged(CanvasMode.a2ui),
-            tokens: tokens,
-          ),
-          _divider(),
-          _ModeButton(
             label: 'drawio',
             isSelected: currentMode == CanvasMode.drawio,
             onTap: () => onModeChanged(CanvasMode.drawio),
@@ -652,6 +645,15 @@ class _ModeToggle extends StatelessWidget {
             label: 'browser',
             isSelected: currentMode == CanvasMode.browser,
             onTap: () => onModeChanged(CanvasMode.browser),
+            badge: 'n/a',
+            tokens: tokens,
+          ),
+          _divider(),
+          _ModeButton(
+            label: 'a2ui',
+            isSelected: currentMode == CanvasMode.a2ui,
+            onTap: () => onModeChanged(CanvasMode.a2ui),
+            badge: 'beta',
             tokens: tokens,
           ),
         ],
@@ -671,6 +673,7 @@ class _ModeButton extends StatelessWidget {
   final String label;
   final bool isSelected;
   final VoidCallback onTap;
+  final String? badge;
   final Widget? trailing;
   final ShellTokens tokens;
 
@@ -678,6 +681,7 @@ class _ModeButton extends StatelessWidget {
     required this.label,
     required this.isSelected,
     required this.onTap,
+    this.badge,
     this.trailing,
     required this.tokens,
   });
@@ -708,6 +712,25 @@ class _ModeButton extends StatelessWidget {
                   letterSpacing: 0.5,
                 ),
               ),
+              if (badge != null) ...[
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(
+                    borderRadius: kShellBorderRadiusSm,
+                    color: tokens.statusWarning.withOpacity(0.15),
+                    border: Border.all(color: tokens.statusWarning.withOpacity(0.45), width: 0.5),
+                  ),
+                  child: Text(
+                    badge!,
+                    style: TextStyle(
+                      fontSize: 8,
+                      color: tokens.statusWarning,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                ),
+              ],
               if (trailing != null) trailing!,
             ],
           ),

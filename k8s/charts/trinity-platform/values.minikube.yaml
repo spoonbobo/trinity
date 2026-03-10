@@ -21,10 +21,12 @@ secrets:
   vaultToken: "root"
   orchestratorServiceToken: "trinity-orchestrator-token-123"
   zenApiKey: ""
+  delegationJwtSecret: "trinity-delegation-jwt-secret-dev-1234567890"
   lightragInternalToken: "trinity-lightrag-internal-token-123"
   lightragLlmApiKey: ""
   lightragEmbeddingApiKey: ""
   poeApiKey: ""
+  braveApiKey: ""
   authentikClientSecret: ""
 
 urls:

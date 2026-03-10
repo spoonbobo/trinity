@@ -576,13 +576,23 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
       );
     } else if (!hasRenderable) {
       canvasBody = Center(
-        child: SizedBox(
-          width: 80,
-          child: LinearProgressIndicator(
-            backgroundColor: t.surfaceElevated,
-            color: t.accentPrimary,
-            minHeight: 2,
-          ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 80,
+              child: LinearProgressIndicator(
+                backgroundColor: t.surfaceElevated,
+                color: t.accentPrimary,
+                minHeight: 2,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'non-renderable A2UI payload',
+              style: TextStyle(fontSize: 10, color: t.fgPlaceholder),
+            ),
+          ],
         ),
       );
     } else {
@@ -1016,6 +1026,8 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
     }
 
     final primary = c.props['primary'] as bool? ?? false;
+    final variantRaw = c.props['variant']?.toString().toLowerCase();
+    final variant = variantRaw ?? (primary ? 'primary' : 'secondary');
 
     final childId = c.props['child'] as String?;
     Widget? childWidget;
@@ -1033,8 +1045,19 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
             ? () => _sendUserAction(actionName!, surface, c.id, actionContext)
             : null,
         style: ElevatedButton.styleFrom(
-          backgroundColor: primary ? theme.colorScheme.primary : theme.colorScheme.surface,
-          foregroundColor: primary ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
+          backgroundColor: switch (variant) {
+            'danger' => theme.colorScheme.error,
+            'primary' => theme.colorScheme.primary,
+            _ => theme.colorScheme.surface,
+          },
+          foregroundColor: switch (variant) {
+            'danger' => theme.colorScheme.onError,
+            'primary' => theme.colorScheme.onPrimary,
+            _ => theme.colorScheme.onSurface,
+          },
+          side: variant == 'secondary'
+              ? BorderSide(color: theme.colorScheme.outline)
+              : null,
           shape: RoundedRectangleBorder(borderRadius: kShellBorderRadiusSm),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         ),

@@ -38,6 +38,8 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
   String? _docsError;
   List<Map<String, dynamic>> _documents = const [];
   bool _uploading = false;
+  bool _delegationTesting = false;
+  String? _delegationStatus;
   String _docStatusFilter = 'all';
   String _docTypeFilter = 'all';
   final TextEditingController _docSearchCtrl = TextEditingController();
@@ -289,6 +291,74 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _docsError = '$e');
+    }
+  }
+
+  Future<void> _runDelegationSmokeTest() async {
+    final auth = ref.read(authClientProvider);
+    final token = auth.state.token;
+    final openclawId = auth.state.activeOpenClawId;
+    if (token == null || token.isEmpty || openclawId == null || openclawId.isEmpty) {
+      setState(() => _delegationStatus = 'delegation test: no active claw selected');
+      return;
+    }
+
+    setState(() {
+      _delegationTesting = true;
+      _delegationStatus = null;
+    });
+
+    try {
+      final mintUrl = '${auth.authServiceBaseUrl}/auth/openclaws/$openclawId/delegation-token';
+      final mintRequest = html.HttpRequest();
+      mintRequest.open('POST', mintUrl);
+      mintRequest.setRequestHeader('Authorization', 'Bearer $token');
+      mintRequest.setRequestHeader('Content-Type', 'application/json');
+      final mintRaw = await _sendRequestWithBody(
+          mintRequest,
+          jsonEncode({
+            'scope': ['lightrag.read', 'lightrag.write'],
+            'session_key': 'main',
+          }));
+      final mintJson = Map<String, dynamic>.from(jsonDecode(mintRaw) as Map);
+      final delegation = (mintJson['token'] ?? '').toString();
+      if (delegation.isEmpty) {
+        throw 'delegation token was not returned';
+      }
+
+      final docsUrl = '${auth.authServiceBaseUrl}/auth/openclaws/$openclawId/lightrag-documents?limit=50';
+      final docsRequest = html.HttpRequest();
+      docsRequest.open('GET', docsUrl);
+      docsRequest.setRequestHeader('X-Trinity-Delegation', delegation);
+      final docsRaw = await _sendRequest(docsRequest);
+      final docsJson = Map<String, dynamic>.from(jsonDecode(docsRaw) as Map);
+      final docs = (docsJson['documents'] as List? ?? const []);
+
+      final queryUrl = '${auth.authServiceBaseUrl}/auth/openclaws/$openclawId/lightrag-query';
+      final queryRequest = html.HttpRequest();
+      queryRequest.open('POST', queryUrl);
+      queryRequest.setRequestHeader('X-Trinity-Delegation', delegation);
+      queryRequest.setRequestHeader('Content-Type', 'application/json');
+      final queryRaw = await _sendRequestWithBody(
+          queryRequest,
+          jsonEncode({
+            'query': 'delegation smoke test',
+            'top_k': 3,
+            'mode': 'hybrid',
+          }));
+      final queryJson = Map<String, dynamic>.from(jsonDecode(queryRaw) as Map);
+      final hasData = queryJson.isNotEmpty;
+
+      if (!mounted) return;
+      setState(() {
+        _delegationStatus =
+            'delegation ok · docs ${docs.length} · query ${hasData ? 'ok' : 'empty'}';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _delegationStatus = 'delegation failed: $e');
+    } finally {
+      if (mounted) setState(() => _delegationTesting = false);
     }
   }
 
@@ -935,6 +1005,22 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
             'apply filters',
             onTap: _loadDocuments,
           ),
+          _presetChip(
+            context,
+            t,
+            theme,
+            _delegationTesting ? 'testing delegation...' : 'test delegation',
+            onTap: _delegationTesting ? null : _runDelegationSmokeTest,
+          ),
+          if (_delegationStatus != null)
+            Text(
+              _delegationStatus!,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: _delegationStatus!.startsWith('delegation ok')
+                    ? t.accentPrimary
+                    : t.statusError,
+              ),
+            ),
         ],
       ),
     );

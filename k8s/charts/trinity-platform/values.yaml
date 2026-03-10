@@ -17,6 +17,7 @@ secrets:
   grafanaPassword: ""
   vaultToken: "root"
   zenApiKey: ""
+  delegationJwtSecret: ""
   lightragInternalToken: ""
   lightragLlmApiKey: ""
   lightragEmbeddingApiKey: ""
@@ -25,6 +26,8 @@ secrets:
   orchestratorServiceToken: ""
   # POE API key for nano-banana-2-poe and other POE-backed skills
   poeApiKey: ""
+  # Brave Search API key for web_search tool in OpenClaw
+  braveApiKey: ""
   # Authentik client secret (when Keycloak Authentik federation is enabled)
   authentikClientSecret: ""
 
@@ -301,7 +304,7 @@ site:
 # ─── Fluentd ──────────────────────────────────────────────────────────────
 fluentd:
   enabled: true
-  image: fluent/fluentd:v1.16-1
+  image: grafana/fluent-plugin-loki:main
   resources:
     limits:
       memory: 256Mi

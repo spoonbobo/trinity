@@ -46,8 +46,9 @@ class CanvasModeNotifier extends StateNotifier<CanvasMode> {
       case 'browser':
         return CanvasMode.browser;
       case 'a2ui':
-      default:
         return CanvasMode.a2ui;
+      default:
+        return CanvasMode.drawio;
     }
   }
 
@@ -93,8 +94,9 @@ class DrawIOThemeNotifier extends StateNotifier<DrawIOTheme> {
       case 'dark':
         return DrawIOTheme.dark;
       case 'light':
-      default:
         return DrawIOTheme.light;
+      default:
+        return DrawIOTheme.dark;
     }
   }
 
