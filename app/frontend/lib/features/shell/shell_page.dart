@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:html' as html;
-import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,10 +26,8 @@ import '../admin/admin_dialog.dart';
 import '../admin/admin_copilot_tab.dart';
 import '../admin/admin_channels_tab.dart';
 import '../sessions/session_drawer.dart';
-import '../command_palette/command_palette.dart';
 import '../notifications/notification_center.dart';
 import '../../core/dialog_service.dart';
-import 'agent_workspace_dialog.dart';
 
 const _canvasSplitKey = 'trinity_canvas_split';
 const _defaultCanvasFlex = 7.0;
@@ -83,7 +80,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
         _canvasFlex = parsed.clamp(_canvasMinFlex, _canvasMaxFlex);
       }
     }
-    // Register global Ctrl+K handler so it works even when prompt bar has focus
+    // Register global keyboard handler
     HardwareKeyboard.instance.addHandler(_globalKeyHandler);
     // Register DOM-level keydown to catch Escape even when iframe is focused
     _domKeyDownSub = html.window.onKeyDown.listen(_handleDomKeyDown);
@@ -330,6 +327,9 @@ class _ShellPageState extends ConsumerState<ShellPage> {
   bool _globalKeyHandler(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
 
+    final terminalFocused = ref.read(terminalFocusProvider);
+    if (terminalFocused) return false;
+
     // Escape: blur DrawIO iframe to return focus to app
     if (event.logicalKey == LogicalKeyboardKey.escape) {
       final canvasMode = ref.read(canvasModeProvider);
@@ -341,17 +341,12 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       // (URL bar handles its own Escape)
     }
 
-    final isCtrl = HardwareKeyboard.instance.isControlPressed ||
-                   HardwareKeyboard.instance.isMetaPressed;
-    if (isCtrl && event.logicalKey == LogicalKeyboardKey.keyK) {
-      _openCommandPalette();
-      return true;
-    }
     return false;
   }
 
   void _handleDomKeyDown(html.KeyboardEvent event) {
     // DOM-level handler catches key events even when iframe is focused
+    if (ref.read(terminalFocusProvider)) return;
     if (event.keyCode == 27) { // Escape
       final canvasMode = ref.read(canvasModeProvider);
       if (canvasMode == CanvasMode.drawio) {
@@ -374,11 +369,6 @@ class _ShellPageState extends ConsumerState<ShellPage> {
   void _showSkillsDialog() {
     _dialogs.showUnique(context: context, id: 'skills',
       builder: (_) => const SkillsDialog());
-  }
-
-  void _showAgentWorkspaceDialog() {
-    _dialogs.showUnique(context: context, id: 'agent-workspace',
-      builder: (_) => const AgentWorkspaceDialog());
   }
 
   void _showAutomationsDialog() {
@@ -475,99 +465,6 @@ class _ShellPageState extends ConsumerState<ShellPage> {
   // (A) Persist split ratio to localStorage
   void _persistSplit() {
     html.window.localStorage[_canvasSplitKey] = _canvasFlex.toStringAsFixed(2);
-  }
-
-  // Command palette
-  void _openCommandPalette() {
-    final language = ref.read(languageProvider);
-    final authState = ref.read(authClientProvider).state;
-    final isAdmin = authState.hasPermission('users.list');
-    final isSuperadmin = authState.role == AuthRole.superadmin;
-
-    final commands = <CommandItem>[
-      CommandItem(
-        label: tr(language, 'new_session'),
-        icon: Icons.add,
-        action: () {
-          _toggleSessionDrawer();
-        },
-        category: 'sessions',
-      ),
-      CommandItem(
-        label: tr(language, 'sessions_label'),
-        icon: Icons.forum,
-        action: _toggleSessionDrawer,
-        category: 'sessions',
-      ),
-      if (isSuperadmin)
-        CommandItem(
-          label: tr(language, 'configure'),
-          icon: Icons.smart_toy,
-          action: _showCopilotDialog,
-          category: 'navigation',
-        ),
-      if (authState.hasPermission('acp.manage'))
-        CommandItem(
-          label: tr(language, 'agents'),
-          icon: Icons.hub,
-          action: _showAgentWorkspaceDialog,
-          category: 'navigation',
-        ),
-      CommandItem(
-        label: tr(language, 'skills'),
-        icon: Icons.extension,
-        action: _showSkillsDialog,
-        category: 'navigation',
-      ),
-      CommandItem(
-        label: tr(language, 'automations'),
-        icon: Icons.schedule,
-        action: _showAutomationsDialog,
-        category: 'navigation',
-      ),
-      if (isSuperadmin)
-        CommandItem(
-          label: tr(language, 'channels'),
-          icon: Icons.alt_route,
-          action: _showChannelsDialog,
-          category: 'navigation',
-        ),
-      CommandItem(
-        label: tr(language, 'settings'),
-        icon: Icons.settings,
-        action: _showSettingsDialog,
-        category: 'navigation',
-      ),
-      if (isAdmin)
-        CommandItem(
-          label: tr(language, 'admin'),
-          icon: Icons.admin_panel_settings,
-          action: _showAdminDialog,
-          category: 'navigation',
-        ),
-      CommandItem(
-        label: tr(language, 'notifications'),
-        icon: Icons.notifications,
-        action: _toggleNotifications,
-        category: 'navigation',
-      ),
-      CommandItem(
-        label: 'Toggle Theme',
-        description: 'dark / light / system',
-        icon: Icons.brightness_6,
-        action: () {
-          _showSettingsDialog();
-        },
-        category: 'settings',
-      ),
-    ];
-
-    _dialogs.showUnique(
-      context: context,
-      id: 'command-palette',
-      barrierColor: Colors.black54,
-      builder: (_) => CommandPalette(commands: commands),
-    );
   }
 
   @override
@@ -848,12 +745,6 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       OpenClawStatus.error => authClient.openClawError ?? 'failed to load openclaws',
       OpenClawStatus.ready => dotLabel,
     };
-    final shortcutLabel =
-        (defaultTargetPlatform == TargetPlatform.macOS ||
-            defaultTargetPlatform == TargetPlatform.iOS)
-        ? 'cmd+k'
-        : 'ctrl+k';
-
     return Container(
       height: 28,
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -935,15 +826,6 @@ class _ShellPageState extends ConsumerState<ShellPage> {
             ],
             const Spacer(),
             if (!isMobile) ...[
-              if (authState.hasPermission('acp.manage')) ...[
-                _StatusModeActionLink(
-                  label: tr(language, 'agents'),
-                  onTap: _showAgentWorkspaceDialog,
-                  t: t,
-                  textColor: t.accentSecondary,
-                ),
-                const SizedBox(width: 8),
-              ],
               _StatusModeActionLink(
                 label: tr(language, 'skills'),
                 onTap: _showSkillsDialog,
@@ -1008,25 +890,6 @@ class _ShellPageState extends ConsumerState<ShellPage> {
               ),
             ),
           ),
-          if (!isMobile) ...[
-            const SizedBox(width: 10),
-            // Command palette hint
-            GestureDetector(
-              onTap: _openCommandPalette,
-              child: MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                  decoration: BoxDecoration(
-                    borderRadius: kShellBorderRadiusSm,
-                    border: Border.all(color: t.border, width: 0.5),
-                  ),
-                  child: Text(shortcutLabel,
-                    style: TextStyle(fontSize: 8, color: t.fgDisabled)),
-                ),
-              ),
-            ),
-          ],
         ],
       ),
     );

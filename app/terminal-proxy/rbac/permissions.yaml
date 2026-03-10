@@ -123,6 +123,8 @@ terminal:
     - hooks check
     - hooks check --json
     - cat /home/node/.openclaw/workspace/MEMORY.md
+    - ls /home/node/.openclaw/cron-templates
+    - cat /home/node/.openclaw/cron-templates
   standard:
     - doctor
     - skills

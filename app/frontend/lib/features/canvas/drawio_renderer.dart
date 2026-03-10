@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'canvas_mode_provider.dart';
 
 const _drawIOSnapshotsStorageKey = 'trinity_drawio_xml_snapshots_v1';
+const _drawIORecoveryStorageKey = 'trinity_drawio_xml_recovery_v1';
 const _maxDrawIOSnapshots = 20;
 
 class DrawIOSnapshot {
@@ -16,12 +17,14 @@ class DrawIOSnapshot {
   final String name;
   final String xml;
   final DateTime createdAt;
+  final String xmlHash;
 
   const DrawIOSnapshot({
     required this.id,
     required this.name,
     required this.xml,
     required this.createdAt,
+    required this.xmlHash,
   });
 
   Map<String, dynamic> toJson() => {
@@ -29,6 +32,7 @@ class DrawIOSnapshot {
         'name': name,
         'xml': xml,
         'createdAt': createdAt.toIso8601String(),
+        'xmlHash': xmlHash,
       };
 
   static DrawIOSnapshot? fromJson(Map<String, dynamic> json) {
@@ -36,6 +40,7 @@ class DrawIOSnapshot {
     final name = json['name'] as String?;
     final xml = json['xml'] as String?;
     final createdAtRaw = json['createdAt'] as String?;
+    final xmlHash = json['xmlHash'] as String?;
     if (id == null || name == null || xml == null || createdAtRaw == null) {
       return null;
     }
@@ -46,6 +51,7 @@ class DrawIOSnapshot {
       name: name,
       xml: xml,
       createdAt: createdAt,
+      xmlHash: xmlHash ?? DrawIOSnapshotStore.computeHash(xml),
     );
   }
 }
@@ -53,7 +59,7 @@ class DrawIOSnapshot {
 class DrawIOSnapshotStore {
   static List<DrawIOSnapshot> list() {
     final stored = html.window.localStorage[_drawIOSnapshotsStorageKey];
-    if (stored == null || stored.isEmpty) return const [];
+    if (stored == null || stored.isEmpty) return [];
     try {
       final decoded = jsonDecode(stored) as List<dynamic>;
       return decoded
@@ -62,21 +68,37 @@ class DrawIOSnapshotStore {
           .whereType<DrawIOSnapshot>()
           .toList();
     } catch (_) {
-      return const [];
+      return [];
     }
+  }
+
+  static String computeHash(String xml) {
+    var hash = 2166136261;
+    for (final codeUnit in xml.codeUnits) {
+      hash ^= codeUnit;
+      hash = (hash * 16777619) & 0xffffffff;
+    }
+    return hash.toRadixString(16).padLeft(8, '0');
   }
 
   static void save(String name, String xml) {
     final now = DateTime.now();
     final snapshots = list();
-    final safeName = name.trim().isEmpty ? _defaultName(now) : name.trim();
+    final hash = computeHash(xml);
+    final duplicateIndex = snapshots.indexWhere((s) => s.xmlHash == hash);
+    final duplicate = duplicateIndex >= 0 ? snapshots.removeAt(duplicateIndex) : null;
+    final safeName = name.trim().isEmpty
+        ? (duplicate?.name ?? _defaultName(now))
+        : name.trim();
+
     snapshots.insert(
       0,
       DrawIOSnapshot(
-        id: '${now.microsecondsSinceEpoch}',
+        id: duplicate?.id ?? '${now.microsecondsSinceEpoch}',
         name: safeName,
         xml: xml,
         createdAt: now,
+        xmlHash: hash,
       ),
     );
     if (snapshots.length > _maxDrawIOSnapshots) {
@@ -89,6 +111,16 @@ class DrawIOSnapshotStore {
     final snapshots = list();
     snapshots.removeWhere((s) => s.id == id);
     _persist(snapshots);
+  }
+
+  static void saveRecovery(String xml) {
+    html.window.localStorage[_drawIORecoveryStorageKey] = xml;
+  }
+
+  static String? recoveryXml() {
+    final raw = html.window.localStorage[_drawIORecoveryStorageKey];
+    if (raw == null || raw.trim().isEmpty) return null;
+    return raw;
   }
 
   static String _defaultName(DateTime dt) {
@@ -135,6 +167,8 @@ class DrawIORendererState extends ConsumerState<DrawIORenderer> {
   bool _initialized = false;
   String _lastEvent = 'none';
   String? _lastSaveError;
+  Timer? _autoSnapshotTimer;
+  String? _lastRecoveryHash;
 
   bool get canSaveXml => _initialized && (_lastKnownXml?.trim().isNotEmpty ?? false);
 
@@ -147,8 +181,10 @@ class DrawIORendererState extends ConsumerState<DrawIORenderer> {
   void initState() {
     super.initState();
     _viewType = 'drawio-${identityHashCode(this)}';
+    _pendingLoadXml = DrawIOSnapshotStore.recoveryXml();
     _setupIframe();
     _listenMessages();
+    _startAutoSnapshot();
   }
 
   @override
@@ -180,6 +216,7 @@ class DrawIORendererState extends ConsumerState<DrawIORenderer> {
       'embed': '1',
       'ui': 'min',
       'dark': darkMode,
+      'lang': 'en',
       'proto': 'json',
       'spin': '1',
       'saveAndExit': '0',
@@ -223,6 +260,7 @@ class DrawIORendererState extends ConsumerState<DrawIORenderer> {
       'embed': '1',
       'ui': 'min',
       'dark': darkMode,
+      'lang': 'en',
       'proto': 'json',
       'spin': '1',
       'saveAndExit': '0',
@@ -306,6 +344,7 @@ class DrawIORendererState extends ConsumerState<DrawIORenderer> {
         final autosaveXml = msg['xml'] as String?;
         if (autosaveXml != null && autosaveXml.trim().isNotEmpty) {
           _lastKnownXml = autosaveXml;
+          _persistRecoveryIfChanged();
         }
         break;
       case 'export':
@@ -322,6 +361,7 @@ class DrawIORendererState extends ConsumerState<DrawIORenderer> {
         final xml = msg['xml'] as String?;
         if (xml != null && xml.trim().isNotEmpty) {
           _lastKnownXml = xml;
+          _persistRecoveryIfChanged();
         }
         if (_pendingXmlSave != null && !_pendingXmlSave!.isCompleted) {
           _pendingXmlSave!.complete(xml);
@@ -453,6 +493,10 @@ class DrawIORendererState extends ConsumerState<DrawIORenderer> {
   }
 
   Future<bool> saveXmlSnapshot() async {
+    return saveXmlSnapshotNamed('');
+  }
+
+  Future<bool> saveXmlSnapshotNamed(String name) async {
     _lastSaveError = null;
 
     if (!_initialized) {
@@ -470,7 +514,7 @@ class DrawIORendererState extends ConsumerState<DrawIORenderer> {
       return false;
     }
     try {
-      DrawIOSnapshotStore.save('', xml);
+      DrawIOSnapshotStore.save(name, xml);
       return true;
     } catch (e) {
       _lastSaveError = 'localStorage write failed: $e';
@@ -481,6 +525,7 @@ class DrawIORendererState extends ConsumerState<DrawIORenderer> {
   void loadXmlSnapshot(String xml) {
     if (xml.trim().isEmpty) return;
     _lastKnownXml = xml;
+    _persistRecoveryIfChanged();
     _post({
       'action': 'load',
       'xml': xml,
@@ -532,9 +577,27 @@ class DrawIORendererState extends ConsumerState<DrawIORenderer> {
     return svgText.substring(quoteIndex + 1, end);
   }
 
+  void _startAutoSnapshot() {
+    _autoSnapshotTimer?.cancel();
+    _autoSnapshotTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _persistRecoveryIfChanged(),
+    );
+  }
+
+  void _persistRecoveryIfChanged() {
+    final xml = _lastKnownXml;
+    if (xml == null || xml.trim().isEmpty) return;
+    final hash = DrawIOSnapshotStore.computeHash(xml);
+    if (hash == _lastRecoveryHash) return;
+    _lastRecoveryHash = hash;
+    DrawIOSnapshotStore.saveRecovery(xml);
+  }
+
   @override
   void dispose() {
     _messageSub?.cancel();
+    _autoSnapshotTimer?.cancel();
     super.dispose();
   }
 

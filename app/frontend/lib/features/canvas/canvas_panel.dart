@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 import '../../core/theme.dart';
 import '../../core/dialog_service.dart';
+import '../../core/toast_provider.dart';
 import 'canvas_mode_provider.dart';
 import 'a2ui_renderer.dart';
 import 'drawio_renderer.dart';
@@ -21,6 +22,14 @@ class CanvasPanel extends ConsumerStatefulWidget {
 }
 
 class _CanvasPanelState extends ConsumerState<CanvasPanel> {
+  void _showSaveAsDialog() {
+    DialogService.instance.showUnique(
+      context: context,
+      id: 'drawio-save-as-xml',
+      builder: (_) => const _DrawIOSaveAsDialog(),
+    );
+  }
+
   void _showLoadXmlDialog() {
     DialogService.instance.showUnique(
       context: context,
@@ -117,28 +126,32 @@ class _CanvasPanelState extends ConsumerState<CanvasPanel> {
                       final state = CanvasPanel.drawioKey.currentState;
                       if (state == null) {
                         if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('drawio not ready (state unavailable)'),
-                            duration: Duration(milliseconds: 1600),
-                          ),
+                        ToastService.showError(
+                          context,
+                          'drawio not ready (state unavailable)',
                         );
                         return;
                       }
 
                       final ok = await state.saveXmlSnapshot();
                       if (!mounted) return;
-                      final messenger = ScaffoldMessenger.of(context);
                       final details = state.lastSaveError ?? state.debugStatus;
-                      messenger.showSnackBar(
-                        SnackBar(
-                          content: Text(ok
-                              ? 'saved XML snapshot'
-                              : 'unable to save XML snapshot ($details)'),
-                          duration: const Duration(milliseconds: 2200),
-                        ),
-                      );
+                      if (ok) {
+                        ToastService.showInfo(context, 'saved XML snapshot');
+                      } else {
+                        ToastService.showError(
+                          context,
+                          'unable to save XML snapshot ($details)',
+                        );
+                      }
                     },
+                    tokens: t,
+                  ),
+                  const SizedBox(width: 2),
+                  _SmallTextButton(
+                    label: 'save as',
+                    tooltip: 'save xml with custom name',
+                    onTap: _showSaveAsDialog,
                     tokens: t,
                   ),
                   const SizedBox(width: 2),
@@ -213,6 +226,115 @@ class _CanvasPanelState extends ConsumerState<CanvasPanel> {
   }
 }
 
+class _DrawIOSaveAsDialog extends StatefulWidget {
+  const _DrawIOSaveAsDialog();
+
+  @override
+  State<_DrawIOSaveAsDialog> createState() => _DrawIOSaveAsDialogState();
+}
+
+class _DrawIOSaveAsDialogState extends State<_DrawIOSaveAsDialog> {
+  final TextEditingController _nameController = TextEditingController();
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = ShellTokens.of(context);
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: kShellBorderRadius),
+      backgroundColor: t.surfaceBase,
+      child: Container(
+        width: 360,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          borderRadius: kShellBorderRadius,
+          border: Border.all(color: t.border, width: 0.5),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'save xml snapshot as',
+              style: TextStyle(fontSize: 11, color: t.fgSecondary),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: t.border, width: 0.5),
+                borderRadius: kShellBorderRadiusSm,
+              ),
+              child: TextField(
+                controller: _nameController,
+                autofocus: true,
+                style: TextStyle(fontSize: 11, color: t.fgSecondary),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: 'diagram name',
+                  hintStyle: TextStyle(fontSize: 11, color: t.fgMuted),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  border: InputBorder.none,
+                ),
+                onSubmitted: (_) => _save(context),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                _DialogTextButton(
+                  label: 'cancel',
+                  onTap: () => Navigator.of(context).pop(),
+                  tokens: t,
+                ),
+                const SizedBox(width: 6),
+                _DialogTextButton(
+                  label: 'save',
+                  onTap: () => _save(context),
+                  tokens: t,
+                  primary: true,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _save(BuildContext context) async {
+    final state = CanvasPanel.drawioKey.currentState;
+    if (state == null) {
+      if (!mounted) return;
+      ToastService.showError(
+        context,
+        'drawio not ready (state unavailable)',
+      );
+      return;
+    }
+
+    final ok = await state.saveXmlSnapshotNamed(_nameController.text);
+    if (!mounted) return;
+    if (ok) {
+      Navigator.of(context).pop();
+    }
+    final details = state.lastSaveError ?? state.debugStatus;
+    if (ok) {
+      ToastService.showInfo(context, 'saved XML snapshot');
+    } else {
+      ToastService.showError(
+        context,
+        'unable to save XML snapshot ($details)',
+      );
+    }
+  }
+}
+
 class _DrawIOLoadDialog extends StatefulWidget {
   const _DrawIOLoadDialog();
 
@@ -284,7 +406,7 @@ class _DrawIOLoadDialogState extends State<_DrawIOLoadDialog> {
                   separatorBuilder: (_, __) => Divider(height: 1, color: t.border),
                   itemBuilder: (context, index) {
                     final snap = _snapshots[index];
-                    final ts = _formatTimestamp(snap.createdAt);
+                    final ts = '${_formatTimestamp(snap.createdAt)} • ${_formatSize(snap.xml.length)}';
                     return _SnapshotRow(
                       snapshot: snap,
                       subtitle: ts,
@@ -315,6 +437,14 @@ class _DrawIOLoadDialogState extends State<_DrawIOLoadDialog> {
     final min = dt.minute.toString().padLeft(2, '0');
     final sec = dt.second.toString().padLeft(2, '0');
     return '$yyyy-$mm-$dd $hh:$min:$sec';
+  }
+
+  String _formatSize(int bytes) {
+    if (bytes < 1024) return '${bytes}B';
+    final kb = bytes / 1024;
+    if (kb < 1024) return '${kb.toStringAsFixed(1)}KB';
+    final mb = kb / 1024;
+    return '${mb.toStringAsFixed(2)}MB';
   }
 }
 
@@ -593,6 +723,48 @@ class _SmallTextButton extends StatelessWidget {
                 color: tokens.fgMuted,
                 letterSpacing: 0.2,
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DialogTextButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  final ShellTokens tokens;
+  final bool primary;
+
+  const _DialogTextButton({
+    required this.label,
+    required this.onTap,
+    required this.tokens,
+    this.primary = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: kShellBorderRadiusSm,
+            color: primary ? tokens.accentPrimary.withOpacity(0.15) : tokens.surfaceBase,
+            border: Border.all(
+              color: primary ? tokens.accentPrimary.withOpacity(0.6) : tokens.border,
+              width: 0.5,
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              color: primary ? tokens.accentPrimary : tokens.fgMuted,
             ),
           ),
         ),

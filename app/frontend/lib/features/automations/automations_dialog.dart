@@ -5,6 +5,7 @@ import '../../core/theme.dart';
 import '../../core/i18n.dart';
 import '../../core/toast_provider.dart';
 import '../../core/cron_utils.dart';
+import '../../core/terminal_client.dart';
 import '../../main.dart' show authClientProvider, languageProvider;
 import '../../core/providers.dart' show terminalClientProvider;
 
@@ -78,6 +79,43 @@ class _AutomationsDialogState extends ConsumerState<AutomationsDialog> {
   String _stripAnsi(String input) {
     final ansi = RegExp(r'\x1B\[[0-9;]*[A-Za-z]');
     return input.replaceAll(ansi, '');
+  }
+
+  String _stripProxySystemLines(String input) {
+    return input
+        .split('\n')
+        .where((l) =>
+            !l.startsWith('\$ ') &&
+            !l.startsWith('Command ') &&
+            !l.startsWith('Permission denied'))
+        .join('\n')
+        .trim();
+  }
+
+  Map<String, dynamic>? _extractFirstJsonMap(String raw) {
+    final cleaned = _stripProxySystemLines(_stripAnsi(raw));
+    if (cleaned.isEmpty) return null;
+
+    var depth = 0;
+    var start = -1;
+    for (var i = 0; i < cleaned.length; i++) {
+      final ch = cleaned[i];
+      if (ch == '{') {
+        if (depth == 0) start = i;
+        depth++;
+      } else if (ch == '}') {
+        depth--;
+        if (depth == 0 && start >= 0) {
+          final fragment = cleaned.substring(start, i + 1);
+          try {
+            final parsed = jsonDecode(fragment);
+            if (parsed is Map<String, dynamic>) return parsed;
+          } catch (_) {}
+          start = -1;
+        }
+      }
+    }
+    return null;
   }
 
   Map<String, dynamic> _decodeJsonObject(String raw) {
@@ -162,12 +200,7 @@ class _AutomationsDialogState extends ConsumerState<AutomationsDialog> {
           .map((e) => e.map((k, v) => MapEntry(k.toString(), v)))
           .toList();
 
-      // Load cron templates from filesystem (separate from cron jobs)
-      final templatesRaw = await client.executeCommandForOutput(
-        'cat /home/node/.openclaw/cron-templates/*.json',
-        timeout: const Duration(seconds: 10),
-      ).catchError((_) => '');
-      final templates = _parseConcatenatedJson(templatesRaw);
+      final templates = await _loadCronTemplatesFromFilesystem(client);
 
       if (!mounted) return;
       setState(() {
@@ -188,46 +221,35 @@ class _AutomationsDialogState extends ConsumerState<AutomationsDialog> {
     }
   }
 
-  /// Parse concatenated JSON objects from `cat *.json` output.
-  /// Each file is a separate JSON object; they are concatenated without
-  /// separators. We split on `}\n{` boundaries and also handle system
-  /// message lines ($ cat ...) from the terminal proxy.
-  List<Map<String, dynamic>> _parseConcatenatedJson(String raw) {
-    final stripped = _stripAnsi(raw).trim();
-    if (stripped.isEmpty) return [];
+  Future<List<Map<String, dynamic>>> _loadCronTemplatesFromFilesystem(
+    TerminalProxyClient client,
+  ) async {
+    final lsRaw = await client.executeCommandForOutput(
+      'ls /home/node/.openclaw/cron-templates',
+      timeout: const Duration(seconds: 10),
+    ).catchError((_) => '');
 
-    final results = <Map<String, dynamic>>[];
-    // Remove terminal proxy system messages (lines starting with "$ ")
-    final cleaned = stripped
-        .split('\n')
-        .where((l) => !l.startsWith('\$ ') && !l.startsWith('Command '))
-        .join('\n')
-        .trim();
-    if (cleaned.isEmpty) return [];
+    final cleanedLs = _stripProxySystemLines(_stripAnsi(lsRaw));
+    if (cleanedLs.isEmpty) return const [];
 
-    // Strategy: find each top-level JSON object by tracking brace depth
-    int depth = 0;
-    int start = -1;
-    for (int i = 0; i < cleaned.length; i++) {
-      final ch = cleaned[i];
-      if (ch == '{') {
-        if (depth == 0) start = i;
-        depth++;
-      } else if (ch == '}') {
-        depth--;
-        if (depth == 0 && start >= 0) {
-          final fragment = cleaned.substring(start, i + 1);
-          try {
-            final parsed = jsonDecode(fragment);
-            if (parsed is Map<String, dynamic>) {
-              results.add(parsed);
-            }
-          } catch (_) {}
-          start = -1;
-        }
-      }
+    final files = cleanedLs
+        .split(RegExp(r'\s+'))
+        .map((f) => f.trim())
+        .where((f) => f.endsWith('.json'))
+        .toList();
+
+    final templates = <Map<String, dynamic>>[];
+    for (final file in files) {
+      final safeFile = file.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '');
+      if (safeFile.isEmpty) continue;
+      final raw = await client.executeCommandForOutput(
+        'cat /home/node/.openclaw/cron-templates/$safeFile',
+        timeout: const Duration(seconds: 10),
+      ).catchError((_) => '');
+      final parsed = _extractFirstJsonMap(raw);
+      if (parsed != null) templates.add(parsed);
     }
-    return results;
+    return templates;
   }
 
   // ---------------------------------------------------------------------------

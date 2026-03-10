@@ -2,7 +2,8 @@ import { tool } from "@opencode-ai/plugin"
 
 export default tool({
   description:
-    "Run an OpenClaw CLI command on a per-user OpenClaw pod via kubectl exec. " +
+    "Internal tool: run an OpenClaw CLI command on a per-user OpenClaw pod via kubectl exec. " +
+    "For user-facing guidance, prefer PTY `openclaw ...` commands instead of kubectl. " +
     "The pod name is derived from the OPENCLAW_POD env var (defaults to 'openclaw-tender-claw'). " +
     "Examples: 'status', 'models', 'sessions', 'health --json', 'skills list --json', 'doctor'.",
   args: {

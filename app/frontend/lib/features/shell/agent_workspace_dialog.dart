@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme.dart';
 import '../../core/toast_provider.dart';
@@ -1182,11 +1183,43 @@ class _AgentWorkspaceDialogState extends ConsumerState<AgentWorkspaceDialog> {
                       ],
                     )
                   : _memLoaded
-                      ? SelectableText(
-                          _memContent,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: t.fgPrimary,
-                            height: 1.6,
+                      ? MarkdownBody(
+                          data: _memContent,
+                          selectable: true,
+                          styleSheet: MarkdownStyleSheet(
+                            p: theme.textTheme.bodySmall?.copyWith(
+                              color: t.fgPrimary,
+                              height: 1.6,
+                            ),
+                            h1: theme.textTheme.bodyMedium?.copyWith(
+                              color: t.fgPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            h2: theme.textTheme.bodyMedium?.copyWith(
+                              color: t.fgPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            h3: theme.textTheme.bodySmall?.copyWith(
+                              color: t.fgPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            code: theme.textTheme.bodySmall?.copyWith(
+                              color: t.accentPrimary,
+                              fontSize: 11,
+                            ),
+                            codeblockDecoration: BoxDecoration(
+                              color: t.surfaceCard,
+                              border: Border.all(color: t.border, width: 0.5),
+                            ),
+                            blockquoteDecoration: BoxDecoration(
+                              color: t.surfaceCard.withOpacity(0.5),
+                              border: Border(
+                                left: BorderSide(color: t.border, width: 2),
+                              ),
+                            ),
+                            listBullet: theme.textTheme.bodySmall?.copyWith(
+                              color: t.fgMuted,
+                            ),
                           ),
                         )
                       : Text('loading...',

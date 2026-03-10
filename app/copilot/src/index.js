@@ -83,6 +83,8 @@ function buildContext(user, selectedOpenClaw, openclawReachable) {
         "The user has an interactive PTY terminal side-by-side with this chat.",
         "Do not claim you executed commands unless the user pasted command output.",
         "Prefer giving exact `openclaw ...` commands for the user to run in PTY.",
+        "Do not suggest kubectl for normal user workflows.",
+        "Only mention kubectl if the user explicitly asks for Kubernetes/cluster operations.",
         "Available openclaw CLI commands:",
         "  status, health [--json], skills list [--json], crons list [--json],",
         "  hooks list [--json], hooks check [--json], sessions [--json], logs,",

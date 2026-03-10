@@ -48,7 +48,11 @@ function isCommandAllowedForTier(cleanCmd, tier) {
   let bestMatch = null;
   let bestLen = -1;
   for (const a of [...allowed, ...allCommands]) {
-    if (cleanCmd === a || cleanCmd.startsWith(a + ' ')) {
+    if (
+      cleanCmd === a ||
+      cleanCmd.startsWith(a + ' ') ||
+      cleanCmd.startsWith(a + '/')
+    ) {
       if (a.length > bestLen) {
         bestMatch = a;
         bestLen = a.length;

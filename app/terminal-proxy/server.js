@@ -263,7 +263,11 @@ function validateCommand(cmd) {
 
   // Use exact match or exact-prefix-with-space matching (word boundary)
   const isAllowed = allowedCommands.some(allowed => {
-    return cleanCmd === allowed || cleanCmd.startsWith(allowed + ' ');
+    return (
+      cleanCmd === allowed ||
+      cleanCmd.startsWith(allowed + ' ') ||
+      cleanCmd.startsWith(allowed + '/')
+    );
   });
 
   return {
@@ -311,6 +315,9 @@ function _buildDockerArgs(validation, token, openclawId) {
   if (validation.cleanCmd.startsWith('cat ')) {
     const filePath = validation.cleanCmd.substring(4).trim();
     args.push(OPENCLAW_CONTAINER, 'cat', filePath);
+  } else if (validation.cleanCmd.startsWith('ls ')) {
+    const lsArgs = validation.cleanCmd.split(' ').slice(1);
+    args.push(OPENCLAW_CONTAINER, 'ls', ...lsArgs);
   } else if (validation.cleanCmd === 'clawhub' || validation.cleanCmd.startsWith('clawhub ')) {
     args.push(OPENCLAW_CONTAINER, 'clawhub', ...validation.cleanCmd.split(' ').slice(1));
   } else {
@@ -341,6 +348,8 @@ function _buildKubectlArgs(validation, podName, podToken, openclawId) {
   if (validation.cleanCmd.startsWith('cat ')) {
     const filePath = validation.cleanCmd.substring(4).trim();
     args.push('cat', filePath);
+  } else if (validation.cleanCmd.startsWith('ls ')) {
+    args.push('ls', ...validation.cleanCmd.split(' ').slice(1));
   } else if (validation.cleanCmd === 'clawhub' || validation.cleanCmd.startsWith('clawhub ')) {
     args.push('clawhub', ...validation.cleanCmd.split(' ').slice(1));
   } else {
@@ -1061,12 +1070,37 @@ wss.on('connection', (ws, req) => {
 
           try {
             let shellBin, shellArgs;
+            const interactiveShellCmd = 'if command -v bash >/dev/null 2>&1; then exec bash -il; else exec sh -i; fi';
             if (EXEC_MODE === 'kubectl' && resolvedPod && resolvedPod.podName) {
               shellBin = 'kubectl';
-              shellArgs = ['exec', '-it', resolvedPod.podName, '-n', K8S_NAMESPACE, '--', '/bin/sh'];
+              shellArgs = [
+                'exec',
+                '-it',
+                resolvedPod.podName,
+                '-n',
+                K8S_NAMESPACE,
+                '--',
+                'env',
+                'TERM=xterm-256color',
+                'COLORTERM=truecolor',
+                '/bin/sh',
+                '-lc',
+                interactiveShellCmd,
+              ];
             } else {
               shellBin = 'docker';
-              shellArgs = ['exec', '-it', OPENCLAW_CONTAINER, '/bin/sh'];
+              shellArgs = [
+                'exec',
+                '-e',
+                'TERM=xterm-256color',
+                '-e',
+                'COLORTERM=truecolor',
+                '-it',
+                OPENCLAW_CONTAINER,
+                '/bin/sh',
+                '-lc',
+                interactiveShellCmd,
+              ];
             }
 
             shellProcess = pty.spawn(shellBin, shellArgs, {

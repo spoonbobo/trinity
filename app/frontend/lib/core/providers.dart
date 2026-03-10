@@ -85,3 +85,6 @@ final activeSessionProvider = StateProvider<String>((ref) => 'main');
 
 /// The currently selected OpenClaw instance ID.
 final activeOpenClawProvider = StateProvider<String?>((ref) => null);
+
+/// Whether an interactive PTY terminal currently has keyboard focus.
+final terminalFocusProvider = StateProvider<bool>((ref) => false);

@@ -1,3 +1,5 @@
+import 'dart:html' as html;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -10,6 +12,11 @@ import '../../core/terminal_client.dart';
 import '../../core/theme.dart';
 import '../../core/toast_provider.dart';
 import '../terminal/pty_terminal_view.dart';
+
+const _copilotTerminalWidthStorageKey = 'trinity_copilot_terminal_width_v1';
+const _copilotTerminalDefaultWidth = 520.0;
+const _copilotTerminalMinWidth = 360.0;
+const _copilotTerminalMaxWidthRatio = 0.75;
 
 String _formatCopilotTimestamp(DateTime ts) {
   final h = ts.hour.toString().padLeft(2, '0');
@@ -39,10 +46,19 @@ class _AdminCopilotTabState extends ConsumerState<AdminCopilotTab> {
   bool _sending = false;
   String? _lastOpenClawId;
   TerminalProxyClient? _ptyClient;
+  double _terminalPaneWidth = _copilotTerminalDefaultWidth;
+  bool _terminalDividerHovered = false;
 
   @override
   void initState() {
     super.initState();
+    final stored = html.window.localStorage[_copilotTerminalWidthStorageKey];
+    if (stored != null) {
+      final parsed = double.tryParse(stored);
+      if (parsed != null) {
+        _terminalPaneWidth = parsed;
+      }
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadMessages();
       _ensurePtyClient();
@@ -243,6 +259,11 @@ class _AdminCopilotTabState extends ConsumerState<AdminCopilotTab> {
     return 'no model';
   }
 
+  void _persistTerminalPaneWidth() {
+    html.window.localStorage[_copilotTerminalWidthStorageKey] =
+        _terminalPaneWidth.toStringAsFixed(1);
+  }
+
   void _showModelPicker() {
     final models = _models?.available ?? [];
     if (models.isEmpty) return;
@@ -297,18 +318,73 @@ class _AdminCopilotTabState extends ConsumerState<AdminCopilotTab> {
     }
 
     final t = ShellTokens.of(context);
-    return Row(
-      children: [
-        Expanded(
-          flex: 5,
-          child: _buildConversationPanel(authState),
-        ),
-        Container(width: 0.5, color: t.border),
-        SizedBox(
-          width: 430,
-          child: _buildTerminalPane(authState),
-        ),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxTerminalWidth =
+            (constraints.maxWidth * _copilotTerminalMaxWidthRatio)
+                .clamp(
+                  _copilotTerminalMinWidth,
+                  constraints.maxWidth > _copilotTerminalMinWidth + 220
+                      ? constraints.maxWidth - 220
+                      : _copilotTerminalMinWidth,
+                );
+        final boundedTerminalWidth =
+            _terminalPaneWidth.clamp(_copilotTerminalMinWidth, maxTerminalWidth);
+
+        if (boundedTerminalWidth != _terminalPaneWidth) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            setState(() => _terminalPaneWidth = boundedTerminalWidth);
+            _persistTerminalPaneWidth();
+          });
+        }
+
+        return Row(
+          children: [
+            Expanded(
+              child: _buildConversationPanel(authState),
+            ),
+            MouseRegion(
+              cursor: SystemMouseCursors.resizeLeftRight,
+              onEnter: (_) => setState(() => _terminalDividerHovered = true),
+              onExit: (_) => setState(() => _terminalDividerHovered = false),
+              child: GestureDetector(
+                onHorizontalDragUpdate: (details) {
+                  setState(() {
+                    _terminalPaneWidth = (_terminalPaneWidth - details.delta.dx)
+                        .clamp(_copilotTerminalMinWidth, maxTerminalWidth);
+                  });
+                },
+                onHorizontalDragEnd: (_) => _persistTerminalPaneWidth(),
+                onDoubleTap: () {
+                  setState(() {
+                    _terminalPaneWidth = _copilotTerminalDefaultWidth
+                        .clamp(_copilotTerminalMinWidth, maxTerminalWidth);
+                  });
+                  _persistTerminalPaneWidth();
+                },
+                child: Container(
+                  width: 6,
+                  color: Colors.transparent,
+                  child: Center(
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      width: _terminalDividerHovered ? 2 : 1,
+                      color: _terminalDividerHovered
+                          ? t.accentPrimary.withOpacity(0.5)
+                          : t.border,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            SizedBox(
+              width: _terminalPaneWidth,
+              child: _buildTerminalPane(authState),
+            ),
+          ],
+        );
+      },
     );
   }
 
