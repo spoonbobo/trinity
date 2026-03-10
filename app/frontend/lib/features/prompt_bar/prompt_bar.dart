@@ -174,12 +174,15 @@ class _PromptBarState extends ConsumerState<PromptBar> {
         final uploadFutures = fileAttachments.map((a) async {
           try {
             final bytes = base64Decode(a.base64);
-            final jwt = ref.read(authClientProvider).state.token ?? '';
+            final authState = ref.read(authClientProvider).state;
+            final jwt = authState.token ?? '';
+            final openclawId = authState.activeOpenClawId;
             final result = await uploadFileToWorkspace(
               bytes: bytes,
               fileName: a.name,
               mimeType: a.mimeType,
               authToken: jwt,
+              openclawId: openclawId,
             );
             if (result.ok && result.path != null) {
               return result.path!;

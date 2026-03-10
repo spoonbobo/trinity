@@ -1,8 +1,43 @@
+import logging
+
 from fastapi import Header, HTTPException, status
 
 from .config import get_settings
 from .schemas import RequestScope
-from .workspace import build_claw_workspace_id
+from .workspace import build_claw_workspace_id, normalize_workspace_part
+
+logger = logging.getLogger(__name__)
+_workspace_variant_warnings: set[str] = set()
+
+
+def _warn_workspace_variants(tenant_id: str, openclaw_id: str) -> None:
+    settings = get_settings()
+    workspaces_dir = settings.data_dir / "workspaces"
+    if not workspaces_dir.exists():
+        return
+
+    claw_suffix = f"__claw_{normalize_workspace_part(openclaw_id)}"
+    candidates = sorted(
+        path.name
+        for path in workspaces_dir.iterdir()
+        if path.is_dir() and path.name.endswith(claw_suffix)
+    )
+
+    if len(candidates) <= 1:
+        return
+
+    canonical = build_claw_workspace_id(tenant_id, openclaw_id)
+    warning_key = f"{canonical}|{'|'.join(candidates)}"
+    if warning_key in _workspace_variant_warnings:
+        return
+
+    _workspace_variant_warnings.add(warning_key)
+    logger.warning(
+        "Multiple workspace variants detected for openclaw=%s canonical=%s variants=%s",
+        openclaw_id,
+        canonical,
+        candidates,
+    )
 
 
 def require_scope(
@@ -42,6 +77,7 @@ def require_scope(
     derived_workspace = None
     if x_trinity_openclaw:
         derived_workspace = build_claw_workspace_id(x_trinity_tenant, x_trinity_openclaw)
+        _warn_workspace_variants(x_trinity_tenant, x_trinity_openclaw)
 
     if derived_workspace and x_trinity_workspace and x_trinity_workspace != derived_workspace:
         raise HTTPException(

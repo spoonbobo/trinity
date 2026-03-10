@@ -490,39 +490,14 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
         ? fontFamilyName(appFont)
         : 'monospace';
 
-    // #6: Better empty state with label
-    if (_surfaces.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.grid_view_rounded, size: 20, color: t.fgPlaceholder),
-            const SizedBox(height: 6),
-            Text('canvas', style: TextStyle(
-              fontSize: 10, color: t.fgPlaceholder, letterSpacing: 1.5)),
-          ],
-        ),
-      );
-    }
+    final hasSurfaces = _surfaces.isNotEmpty;
 
     // #14: Show loading indicator when surfaces exist but no root yet
     final hasRenderable = _surfaces.values.any(
         (s) => s.rootId != null && s.components.containsKey(s.rootId));
-    if (!hasRenderable) {
-      return Center(
-        child: SizedBox(
-          width: 80,
-          child: LinearProgressIndicator(
-            backgroundColor: t.surfaceElevated,
-            color: t.accentPrimary,
-            minHeight: 2,
-          ),
-        ),
-      );
-    }
 
     // Canvas content: surface list with optional property inspector
-    final canvasContent = Row(
+    final renderableCanvasContent = Row(
       children: [
         // Main surface area
         Expanded(
@@ -583,13 +558,44 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
       ],
     );
 
+    final Widget canvasBody;
+    if (!hasSurfaces) {
+      canvasBody = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.grid_view_rounded, size: 20, color: t.fgPlaceholder),
+            const SizedBox(height: 6),
+            Text('canvas',
+                style: TextStyle(
+                    fontSize: 10,
+                    color: t.fgPlaceholder,
+                    letterSpacing: 1.5)),
+          ],
+        ),
+      );
+    } else if (!hasRenderable) {
+      canvasBody = Center(
+        child: SizedBox(
+          width: 80,
+          child: LinearProgressIndicator(
+            backgroundColor: t.surfaceElevated,
+            color: t.accentPrimary,
+            minHeight: 2,
+          ),
+        ),
+      );
+    } else {
+      canvasBody = renderableCanvasContent;
+    }
+
     // Wrap with Focus for canvas-scoped keyboard shortcuts
     return Focus(
       focusNode: _canvasFocusNode,
       onKeyEvent: _handleCanvasKeyEvent,
       child: Stack(
         children: [
-          canvasContent,
+          canvasBody,
           // Toolbar row: positioned on right side only
           // Mode toggle is handled by parent CanvasPanel on the left
           Positioned(
@@ -599,7 +605,7 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 // Edit mode controls (when editing)
-                if (_editMode) ...[
+                if (_editMode && hasRenderable) ...[
                   ComponentPalette(
                     onAdd: (template) => _addComponent(template),
                     tokens: t,
@@ -630,7 +636,7 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
                 // Edit toggle + copy + export
                 _toolbarButton(
                   icon: _editMode ? Icons.edit : Icons.edit_outlined,
-                  onTap: _toggleEditMode,
+                  onTap: hasSurfaces ? _toggleEditMode : null,
                   tokens: t,
                   active: _editMode,
                   tooltip: _editMode ? 'exit edit' : 'edit',
@@ -638,9 +644,11 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
                 const SizedBox(width: 2),
                 // Copy image button
                 GestureDetector(
-                  onTap: _copyAsImage,
+                  onTap: hasRenderable ? _copyAsImage : null,
                   child: MouseRegion(
-                    cursor: SystemMouseCursors.click,
+                    cursor: hasRenderable
+                        ? SystemMouseCursors.click
+                        : SystemMouseCursors.basic,
                     child: Container(
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
@@ -657,15 +665,18 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
                           : Icon(
                               _imageCopied ? Icons.check : Icons.content_copy,
                               size: 12,
-                              color:
-                                  _imageCopied ? t.accentPrimary : t.fgMuted,
+                              color: !hasRenderable
+                                  ? t.fgDisabled
+                                  : _imageCopied
+                                      ? t.accentPrimary
+                                      : t.fgMuted,
                             ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 2),
                 // Download menu
-                _buildExportToolbar(t, theme),
+                _buildExportToolbar(t, theme, enabled: hasRenderable),
               ],
             ),
           ),
@@ -774,13 +785,16 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
     if (_showExportMenu && mounted) setState(() => _showExportMenu = false);
   }
 
-  Widget _buildExportToolbar(ShellTokens t, ThemeData theme) {
+  Widget _buildExportToolbar(ShellTokens t, ThemeData theme,
+      {required bool enabled}) {
     return CompositedTransformTarget(
       link: _exportLayerLink,
       child: GestureDetector(
-        onTap: _toggleExportMenu,
+        onTap: enabled ? _toggleExportMenu : null,
         child: MouseRegion(
-          cursor: SystemMouseCursors.click,
+          cursor: enabled
+              ? SystemMouseCursors.click
+              : SystemMouseCursors.basic,
           child: Container(
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
@@ -788,7 +802,11 @@ class _A2UIRendererPanelState extends ConsumerState<A2UIRendererPanel> {
               color: t.surfaceBase.withOpacity(0.8),
               border: Border.all(color: t.border, width: 0.5),
             ),
-            child: Icon(Icons.download, size: 12, color: t.fgMuted),
+            child: Icon(
+              Icons.download,
+              size: 12,
+              color: enabled ? t.fgMuted : t.fgDisabled,
+            ),
           ),
         ),
       ),

@@ -172,6 +172,56 @@ spec:
                 secretKeyRef:
                   name: trinity-superadmin
                   key: ENABLE_DEFAULT_SUPERADMIN
+            - name: DEFAULT_SUPERADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-superadmin
+                  key: DEFAULT_SUPERADMIN_EMAIL
+            - name: DEFAULT_SUPERADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-superadmin
+                  key: DEFAULT_SUPERADMIN_PASSWORD
+            - name: ORCHESTRATOR_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: ORCHESTRATOR_SERVICE_TOKEN
+            - name: GRAFANA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: GRAFANA_PASSWORD
+            - name: LIGHTRAG_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: LIGHTRAG_INTERNAL_TOKEN
+            - name: LIGHTRAG_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: LIGHTRAG_LLM_API_KEY
+            - name: LIGHTRAG_EMBEDDING_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: LIGHTRAG_EMBEDDING_API_KEY
+            - name: ZEN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: ZEN_API_KEY
+            - name: POE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: POE_API_KEY
+            - name: AUTHENTIK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: AUTHENTIK_CLIENT_SECRET
           volumeMounts:
             - name: scripts
               mountPath: /vault/scripts

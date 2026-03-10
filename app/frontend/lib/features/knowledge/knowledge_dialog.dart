@@ -22,21 +22,26 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
   Map<String, dynamic>? _graph;
   List<dynamic> _labels = const [];
 
-  final TextEditingController _labelFilterCtrl = TextEditingController();
   final TextEditingController _searchCtrl = TextEditingController();
   Timer? _searchDebounce;
-  Timer? _labelSearchDebounce;
 
   String? _selectedLabel;
-  String _labelFilter = '';
   String _searchQuery = '';
   String _entityKindFilter = 'all';
+  String _activeView = 'graph';
   int _maxDepth = 3;
   int _maxNodes = 500;
   bool _neighborsOnly = false;
   bool _searchingRemote = false;
-  bool _sidePanelCollapsed = false;
-  bool _labelSearching = false;
+  bool _showAdvanced = false;
+  bool _docsLoading = false;
+  String? _docsError;
+  List<Map<String, dynamic>> _documents = const [];
+  bool _uploading = false;
+  String _docStatusFilter = 'all';
+  String _docTypeFilter = 'all';
+  final TextEditingController _docSearchCtrl = TextEditingController();
+  String _docQuery = '';
 
   String? _selectedNodeId;
   List<Map<String, dynamic>> _searchResults = const [];
@@ -44,14 +49,13 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
   @override
   void initState() {
     super.initState();
-    _labelFilterCtrl.addListener(() {
-      setState(() => _labelFilter = _labelFilterCtrl.text.trim());
-      _debouncedLabelSearch();
-    });
     _searchCtrl.addListener(() {
       _searchQuery = _searchCtrl.text.trim();
       _refreshLocalSearch();
       _debouncedRemoteSearch();
+    });
+    _docSearchCtrl.addListener(() {
+      setState(() => _docQuery = _docSearchCtrl.text.trim());
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
@@ -59,14 +63,233 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
   @override
   void dispose() {
     _searchDebounce?.cancel();
-    _labelSearchDebounce?.cancel();
-    _labelFilterCtrl.dispose();
     _searchCtrl.dispose();
+    _docSearchCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
     await _loadWithParams(label: _selectedLabel);
+  }
+
+  Future<void> _loadDocuments() async {
+    final auth = ref.read(authClientProvider);
+    final token = auth.state.token;
+    final openclawId = auth.state.activeOpenClawId;
+    if (token == null || token.isEmpty || openclawId == null || openclawId.isEmpty) {
+      setState(() {
+        _docsLoading = false;
+        _docsError = 'no active claw selected';
+      });
+      return;
+    }
+
+    setState(() {
+      _docsLoading = true;
+      _docsError = null;
+    });
+
+    try {
+      final query = <String, String>{
+        'limit': '200',
+        if (_docStatusFilter != 'all') 'status': _docStatusFilter,
+        if (_docTypeFilter != 'all') 'type': _docTypeFilter,
+        if (_docQuery.trim().isNotEmpty) 'q': _docQuery.trim(),
+      };
+      final qs = query.entries
+          .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+          .join('&');
+
+      final url =
+          '${auth.authServiceBaseUrl}/auth/openclaws/$openclawId/lightrag-documents${qs.isEmpty ? '' : '?$qs'}';
+      final request = html.HttpRequest();
+      request.open('GET', url);
+      request.setRequestHeader('Authorization', 'Bearer $token');
+      final response = await _sendRequest(request);
+      final decoded = Map<String, dynamic>.from(jsonDecode(response) as Map);
+      final documents = (decoded['documents'] as List? ?? const [])
+          .whereType<Map>()
+          .map((e) => e.map((k, v) => MapEntry(k.toString(), v)))
+          .toList();
+
+      if (!mounted) return;
+      setState(() => _documents = documents);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _docsError = '$e');
+    } finally {
+      if (mounted) setState(() => _docsLoading = false);
+    }
+  }
+
+  Future<void> _uploadDocument() async {
+    final auth = ref.read(authClientProvider);
+    final token = auth.state.token;
+    final openclawId = auth.state.activeOpenClawId;
+    if (token == null || token.isEmpty || openclawId == null || openclawId.isEmpty) return;
+
+    final picker = html.FileUploadInputElement()..accept = '.pdf,.docx,.txt,.md';
+    picker.click();
+    await picker.onChange.first;
+    final file = picker.files?.isNotEmpty == true ? picker.files!.first : null;
+    if (file == null) return;
+
+    setState(() {
+      _uploading = true;
+      _docsError = null;
+    });
+
+    try {
+      final form = html.FormData();
+      form.appendBlob('file', file, file.name);
+      form.append('document_type', 'other');
+
+      final url = '${auth.authServiceBaseUrl}/auth/openclaws/$openclawId/lightrag-documents';
+      final request = html.HttpRequest();
+      request.open('POST', url);
+      request.setRequestHeader('Authorization', 'Bearer $token');
+      final createRaw = await _sendRequestWithBody(request, form);
+      final created = Map<String, dynamic>.from(jsonDecode(createRaw) as Map);
+      final documentId = (created['document_id'] ?? '').toString();
+      if (documentId.isNotEmpty) {
+        await _ingestDocument(documentId, silent: true);
+      }
+      await _loadDocuments();
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _docsError = '$e');
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  Future<void> _ingestDocument(String documentId, {bool silent = false}) async {
+    final auth = ref.read(authClientProvider);
+    final token = auth.state.token;
+    final openclawId = auth.state.activeOpenClawId;
+    if (token == null || token.isEmpty || openclawId == null || openclawId.isEmpty) return;
+
+    try {
+      final url =
+          '${auth.authServiceBaseUrl}/auth/openclaws/$openclawId/lightrag-documents/${Uri.encodeQueryComponent(documentId)}/ingest';
+      final request = html.HttpRequest();
+      request.open('POST', url);
+      request.setRequestHeader('Authorization', 'Bearer $token');
+      await _sendRequest(request);
+      if (!silent) {
+        await _loadDocuments();
+        await _load();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _docsError = '$e');
+    }
+  }
+
+  Future<void> _deleteDocument(String documentId) async {
+    final confirmed = html.window.confirm('Delete this document from knowledge base?');
+    if (!confirmed) return;
+
+    final auth = ref.read(authClientProvider);
+    final token = auth.state.token;
+    final openclawId = auth.state.activeOpenClawId;
+    if (token == null || token.isEmpty || openclawId == null || openclawId.isEmpty) return;
+
+    try {
+      final url =
+          '${auth.authServiceBaseUrl}/auth/openclaws/$openclawId/lightrag-documents/${Uri.encodeQueryComponent(documentId)}';
+      final request = html.HttpRequest();
+      request.open('DELETE', url);
+      request.setRequestHeader('Authorization', 'Bearer $token');
+      await _sendRequest(request);
+      await _loadDocuments();
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _docsError = '$e');
+    }
+  }
+
+  Future<void> _showDocumentChunks(String documentId) async {
+    final auth = ref.read(authClientProvider);
+    final token = auth.state.token;
+    final openclawId = auth.state.activeOpenClawId;
+    if (token == null || token.isEmpty || openclawId == null || openclawId.isEmpty) return;
+
+    try {
+      final url =
+          '${auth.authServiceBaseUrl}/auth/openclaws/$openclawId/lightrag-documents/${Uri.encodeQueryComponent(documentId)}/chunks';
+      final request = html.HttpRequest();
+      request.open('GET', url);
+      request.setRequestHeader('Authorization', 'Bearer $token');
+      final raw = await _sendRequest(request);
+      final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      final chunks = (decoded['chunks'] as List? ?? const []);
+      if (!mounted) return;
+
+      // ignore: use_build_context_synchronously
+      await showDialog<void>(
+        context: context,
+        builder: (context) {
+          final theme = Theme.of(context);
+          final t = ShellTokens.of(context);
+          return Dialog(
+            backgroundColor: t.surfaceBase,
+            shape: RoundedRectangleBorder(
+              borderRadius: kShellBorderRadius,
+              side: BorderSide(color: t.border, width: 0.5),
+            ),
+            child: Container(
+              width: 720,
+              height: 520,
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'document chunks · ${chunks.length}',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: t.fgPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: chunks.length,
+                      itemBuilder: (context, index) {
+                        final c = Map<String, dynamic>.from(chunks[index] as Map);
+                        final text = (c['text'] ?? '').toString();
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: t.surfaceCard,
+                            border: Border.all(color: t.border, width: 0.5),
+                            borderRadius: kShellBorderRadiusSm,
+                          ),
+                          child: Text(
+                            text.length > 260 ? '${text.substring(0, 260)}…' : text,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: t.fgSecondary,
+                              height: 1.35,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _docsError = '$e');
+    }
   }
 
   Future<void> _loadWithParams({String? label}) async {
@@ -192,46 +415,6 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
     _searchDebounce = Timer(const Duration(milliseconds: 320), _remoteSearch);
   }
 
-  void _debouncedLabelSearch() {
-    final q = _labelFilter.trim();
-    _labelSearchDebounce?.cancel();
-    if (q.isEmpty) return;
-    _labelSearchDebounce = Timer(const Duration(milliseconds: 260), _remoteLabelSearch);
-  }
-
-  Future<void> _remoteLabelSearch() async {
-    final q = _labelFilter.trim();
-    if (q.length < 2) return;
-    final auth = ref.read(authClientProvider);
-    final token = auth.state.token;
-    final openclawId = auth.state.activeOpenClawId;
-    if (token == null || token.isEmpty || openclawId == null || openclawId.isEmpty) return;
-
-    setState(() => _labelSearching = true);
-    try {
-      final url =
-          '${auth.authServiceBaseUrl}/auth/openclaws/$openclawId/lightrag-label-search?q=${Uri.encodeQueryComponent(q)}&limit=80';
-      final request = html.HttpRequest();
-      request.open('GET', url);
-      request.setRequestHeader('Authorization', 'Bearer $token');
-      final response = await _sendRequest(request);
-      final decoded = Map<String, dynamic>.from(jsonDecode(response) as Map);
-      final labels = (decoded['labels'] as List? ?? const [])
-          .map((e) => e.toString())
-          .where((e) => e.isNotEmpty)
-          .toList();
-      if (!mounted) return;
-      if (labels.isNotEmpty) {
-        setState(() {
-          _labels = labels;
-        });
-      }
-    } catch (_) {
-      // Keep local list if remote label search fails.
-    } finally {
-      if (mounted) setState(() => _labelSearching = false);
-    }
-  }
 
   Future<String> _sendRequest(html.HttpRequest request) {
     final completer = Completer<String>();
@@ -248,13 +431,19 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
     return completer.future;
   }
 
-  List<String> get _filteredLabels {
-    if (_labelFilter.isEmpty) return _labels.map((e) => e.toString()).toList();
-    final lower = _labelFilter.toLowerCase();
-    return _labels
-        .map((e) => e.toString())
-        .where((l) => l.toLowerCase().contains(lower))
-        .toList();
+  Future<String> _sendRequestWithBody(html.HttpRequest request, dynamic body) {
+    final completer = Completer<String>();
+    request.onLoad.listen((_) {
+      final status = request.status ?? 0;
+      if (status >= 200 && status < 300) {
+        completer.complete(request.responseText ?? '{}');
+      } else {
+        completer.completeError('HTTP $status: ${request.responseText}');
+      }
+    });
+    request.onError.listen((_) => completer.completeError('request failed'));
+    request.send(body);
+    return completer.future;
   }
 
   List<Map<String, dynamic>> get _graphNodes {
@@ -429,6 +618,7 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
     final theme = Theme.of(context);
     final visible = _computeVisibleGraph();
     final isTruncated = _graph?['is_truncated'] == true;
+    final isGraphView = _activeView == 'graph';
 
     final selectedNode = _selectedNodeId == null
         ? null
@@ -450,45 +640,44 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
         child: Column(
           children: [
             _buildHeader(context, t, theme, visible.nodes.length, visible.edges.length),
-            _buildControls(context, t, theme),
+            if (isGraphView) _buildControls(context, t, theme) else _buildDocumentsControls(context, t, theme),
             Expanded(
-              child: _loading
-                  ? Center(
-                      child: Text(
-                        'loading graph...',
-                        style: theme.textTheme.bodyMedium?.copyWith(color: t.fgPlaceholder),
-                      ),
-                    )
-                  : _error != null
+              child: isGraphView
+                  ? _loading
                       ? Center(
                           child: Text(
-                            _error!,
-                            style: theme.textTheme.bodyMedium?.copyWith(color: t.statusError),
+                            'loading graph...',
+                            style: theme.textTheme.bodyMedium?.copyWith(color: t.fgPlaceholder),
                           ),
                         )
-                      : Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                flex: 7,
-                                child: _KnowledgeGraphCanvas(
-                                  nodes: visible.nodes,
-                                  edges: visible.edges,
-                                  isTruncated: isTruncated,
-                                ),
+                      : _error != null
+                          ? Center(
+                              child: Text(
+                                _error!,
+                                style: theme.textTheme.bodyMedium?.copyWith(color: t.statusError),
                               ),
-                              Container(width: 0.5, color: t.border),
-                              AnimatedContainer(
-                                duration: const Duration(milliseconds: 140),
-                                width: _sidePanelCollapsed ? 36 : 280,
-                                child: _sidePanelCollapsed
-                                    ? _buildSidePanelCollapsed(context, t)
-                                    : _buildSidePanel(context, t, theme, selectedNode),
+                            )
+                          : Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    flex: 7,
+                                    child: _KnowledgeGraphCanvas(
+                                      nodes: visible.nodes,
+                                      edges: visible.edges,
+                                      isTruncated: isTruncated,
+                                    ),
+                                  ),
+                                  Container(width: 0.5, color: t.border),
+                                  SizedBox(
+                                    width: 300,
+                                    child: _buildSidePanel(context, t, theme, selectedNode),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                        ),
+                            )
+                  : _buildDocumentsBody(context, t, theme),
             ),
           ],
         ),
@@ -512,7 +701,7 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
       child: Row(
         children: [
           Text(
-            'knowledge graph',
+            _activeView == 'graph' ? 'knowledge graph' : 'knowledge documents',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: t.fgPrimary,
               fontWeight: FontWeight.w600,
@@ -520,28 +709,42 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
           ),
           const SizedBox(width: 10),
           Text(
-            '$nodeCount nodes · $edgeCount edges',
+            _activeView == 'graph'
+                ? '$nodeCount nodes · $edgeCount edges'
+                : '${_documents.length} documents',
             style: theme.textTheme.labelSmall?.copyWith(color: t.fgMuted),
+          ),
+          const SizedBox(width: 10),
+          _presetChip(
+            context,
+            t,
+            theme,
+            _activeView == 'graph' ? 'graph' : 'graph (off)',
+            onTap: () => setState(() => _activeView = 'graph'),
+          ),
+          _presetChip(
+            context,
+            t,
+            theme,
+            _activeView == 'documents' ? 'documents' : 'documents (off)',
+            onTap: () {
+              setState(() => _activeView = 'documents');
+              _loadDocuments();
+            },
           ),
           const Spacer(),
           GestureDetector(
-            onTap: _loading ? null : _load,
+            onTap: _activeView == 'graph'
+                ? (_loading ? null : _load)
+                : (_docsLoading ? null : _loadDocuments),
             child: Text(
-              _loading ? 'loading...' : 'refresh',
+              _activeView == 'graph'
+                  ? (_loading ? 'loading...' : 'refresh')
+                  : (_docsLoading ? 'loading...' : 'refresh'),
               style: theme.textTheme.labelSmall?.copyWith(
-                color: _loading ? t.fgDisabled : t.accentPrimary,
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          GestureDetector(
-            onTap: () => setState(() => _sidePanelCollapsed = !_sidePanelCollapsed),
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: Icon(
-                _sidePanelCollapsed ? Icons.chevron_left : Icons.chevron_right,
-                size: 14,
-                color: t.fgMuted,
+                color: (_activeView == 'graph' ? _loading : _docsLoading)
+                    ? t.fgDisabled
+                    : t.accentPrimary,
               ),
             ),
           ),
@@ -559,7 +762,7 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
   }
 
   Widget _buildControls(BuildContext context, ShellTokens t, ThemeData theme) {
-    final labels = _filteredLabels;
+    final labels = _labels.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
     final kinds = ['all', ..._entityKinds.toList()..sort()];
 
     return Container(
@@ -573,21 +776,7 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           SizedBox(
-            width: 170,
-            child: _compactInput(
-              controller: _labelFilterCtrl,
-              hint: 'filter labels',
-              t: t,
-              theme: theme,
-            ),
-          ),
-          if (_labelSearching)
-            Text(
-              'labels...',
-              style: theme.textTheme.labelSmall?.copyWith(color: t.fgMuted),
-            ),
-          SizedBox(
-            width: 200,
+            width: 230,
             child: _compactDropdown<String>(
               value: labels.contains(_selectedLabel)
                   ? _selectedLabel
@@ -604,42 +793,102 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
             ),
           ),
           SizedBox(
-            width: 66,
-            child: _compactDropdown<int>(
-              value: _maxDepth,
-              items: const [1, 2, 3, 4, 5],
-              onChanged: _loading
-                  ? null
-                  : (v) {
-                      if (v == null) return;
-                      setState(() => _maxDepth = v);
-                      _load();
-                    },
-              t: t,
-              theme: theme,
-            ),
-          ),
-          SizedBox(
-            width: 88,
-            child: _compactDropdown<int>(
-              value: _maxNodes,
-              items: const [100, 250, 500, 1000, 1500],
-              onChanged: _loading
-                  ? null
-                  : (v) {
-                      if (v == null) return;
-                      setState(() => _maxNodes = v);
-                      _load();
-                    },
-              t: t,
-              theme: theme,
-            ),
-          ),
-          SizedBox(
-            width: 220,
+            width: 250,
             child: _compactInput(
               controller: _searchCtrl,
-              hint: 'search nodes (label/id/kind)',
+              hint: 'search nodes',
+              t: t,
+              theme: theme,
+            ),
+          ),
+          _presetChip(
+            context,
+            t,
+            theme,
+            _neighborsOnly ? 'neighbors on' : 'neighbors off',
+            onTap: () => setState(() => _neighborsOnly = !_neighborsOnly),
+          ),
+          _presetChip(
+            context,
+            t,
+            theme,
+            _showAdvanced ? 'hide advanced' : 'show advanced',
+            onTap: () => setState(() => _showAdvanced = !_showAdvanced),
+          ),
+          if (_searchingRemote)
+            Text(
+              'searching...',
+              style: theme.textTheme.labelSmall?.copyWith(color: t.fgMuted),
+            ),
+          if (_showAdvanced) ...[
+            SizedBox(
+              width: 66,
+              child: _compactDropdown<int>(
+                value: _maxDepth,
+                items: const [1, 2, 3, 4, 5],
+                onChanged: _loading
+                    ? null
+                    : (v) {
+                        if (v == null) return;
+                        setState(() => _maxDepth = v);
+                        _load();
+                      },
+                t: t,
+                theme: theme,
+              ),
+            ),
+            SizedBox(
+              width: 88,
+              child: _compactDropdown<int>(
+                value: _maxNodes,
+                items: const [100, 250, 500, 1000, 1500],
+                onChanged: _loading
+                    ? null
+                    : (v) {
+                        if (v == null) return;
+                        setState(() => _maxNodes = v);
+                        _load();
+                      },
+                t: t,
+                theme: theme,
+              ),
+            ),
+            SizedBox(
+              width: 120,
+              child: _compactDropdown<String>(
+                value: kinds.contains(_entityKindFilter) ? _entityKindFilter : 'all',
+                items: kinds,
+                onChanged: (v) {
+                  if (v == null) return;
+                  setState(() => _entityKindFilter = v);
+                  _refreshLocalSearch();
+                },
+                t: t,
+                theme: theme,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDocumentsControls(BuildContext context, ShellTokens t, ThemeData theme) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: t.border, width: 0.5)),
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          SizedBox(
+            width: 260,
+            child: _compactInput(
+              controller: _docSearchCtrl,
+              hint: 'search documents',
               t: t,
               theme: theme,
             ),
@@ -647,23 +896,130 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
           SizedBox(
             width: 120,
             child: _compactDropdown<String>(
-              value: kinds.contains(_entityKindFilter) ? _entityKindFilter : 'all',
-              items: kinds,
+              value: _docStatusFilter,
+              items: const ['all', 'uploaded', 'indexed', 'failed'],
               onChanged: (v) {
                 if (v == null) return;
-                setState(() => _entityKindFilter = v);
-                _refreshLocalSearch();
+                setState(() => _docStatusFilter = v);
+                _loadDocuments();
               },
               t: t,
               theme: theme,
             ),
           ),
-          if (_searchingRemote)
-            Text(
-              'searching...',
-              style: theme.textTheme.labelSmall?.copyWith(color: t.fgMuted),
+          SizedBox(
+            width: 120,
+            child: _compactDropdown<String>(
+              value: _docTypeFilter,
+              items: const ['all', 'other', 'handbook', 'tender'],
+              onChanged: (v) {
+                if (v == null) return;
+                setState(() => _docTypeFilter = v);
+                _loadDocuments();
+              },
+              t: t,
+              theme: theme,
             ),
+          ),
+          _presetChip(
+            context,
+            t,
+            theme,
+            _uploading ? 'uploading...' : 'upload document',
+            onTap: _uploading ? null : _uploadDocument,
+          ),
+          _presetChip(
+            context,
+            t,
+            theme,
+            'apply filters',
+            onTap: _loadDocuments,
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDocumentsBody(BuildContext context, ShellTokens t, ThemeData theme) {
+    if (_docsLoading) {
+      return Center(
+        child: Text(
+          'loading documents...',
+          style: theme.textTheme.bodyMedium?.copyWith(color: t.fgPlaceholder),
+        ),
+      );
+    }
+    if (_docsError != null) {
+      return Center(
+        child: Text(
+          _docsError!,
+          style: theme.textTheme.bodyMedium?.copyWith(color: t.statusError),
+        ),
+      );
+    }
+    if (_documents.isEmpty) {
+      return Center(
+        child: Text(
+          'no documents yet',
+          style: theme.textTheme.bodyMedium?.copyWith(color: t.fgMuted),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      child: ListView.separated(
+        itemCount: _documents.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 8),
+        itemBuilder: (context, index) {
+          final item = _documents[index];
+          final documentId = (item['document_id'] ?? '').toString();
+          final filename = (item['filename'] ?? '').toString();
+          final status = (item['status'] ?? 'unknown').toString();
+          final type = (item['document_type'] ?? 'other').toString();
+          final chunkCount = (item['chunk_count'] as num?)?.toInt() ?? 0;
+          final updatedAt = (item['updated_at'] ?? '').toString();
+          final updatedShort = updatedAt.length >= 19 ? updatedAt.substring(0, 19) : updatedAt;
+
+          return Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: t.surfaceCard,
+              border: Border.all(color: t.border, width: 0.5),
+              borderRadius: kShellBorderRadiusSm,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        filename.isEmpty ? documentId : filename,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: t.fgPrimary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$type · $status · $chunkCount chunks · $updatedShort',
+                        style: theme.textTheme.labelSmall?.copyWith(color: t.fgMuted),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _inlineAction(context, t, theme, 'ingest', onTap: () => _ingestDocument(documentId)),
+                const SizedBox(width: 8),
+                _inlineAction(context, t, theme, 'chunks', onTap: () => _showDocumentChunks(documentId)),
+                const SizedBox(width: 8),
+                _inlineAction(context, t, theme, 'delete', onTap: () => _deleteDocument(documentId), danger: true),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -770,13 +1126,6 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
                 });
                 _load();
               }),
-              _presetChip(
-                context,
-                t,
-                theme,
-                _neighborsOnly ? 'neighbors: on' : 'neighbors: off',
-                onTap: () => setState(() => _neighborsOnly = !_neighborsOnly),
-              ),
             ],
           ),
           const SizedBox(height: 6),
@@ -823,23 +1172,6 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
                   ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildSidePanelCollapsed(BuildContext context, ShellTokens t) {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(left: BorderSide(color: t.border, width: 0.5)),
-      ),
-      child: Center(
-        child: GestureDetector(
-          onTap: () => setState(() => _sidePanelCollapsed = false),
-          child: MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: Icon(Icons.chevron_left, size: 16, color: t.fgMuted),
-          ),
-        ),
       ),
     );
   }
@@ -924,22 +1256,47 @@ class _KnowledgeDialogState extends ConsumerState<KnowledgeDialog> {
     ShellTokens t,
     ThemeData theme,
     String label, {
-    required VoidCallback onTap,
+    VoidCallback? onTap,
   }) {
     return GestureDetector(
       onTap: onTap,
       child: MouseRegion(
-        cursor: SystemMouseCursors.click,
+        cursor: onTap == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           decoration: BoxDecoration(
             borderRadius: kShellBorderRadiusSm,
             border: Border.all(color: t.border, width: 0.5),
-            color: t.surfaceBase,
+            color: onTap == null ? t.surfaceCard : t.surfaceBase,
           ),
           child: Text(
             label,
-            style: theme.textTheme.labelSmall?.copyWith(color: t.fgMuted, fontSize: 10),
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: onTap == null ? t.fgDisabled : t.fgMuted,
+              fontSize: 10,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _inlineAction(
+    BuildContext context,
+    ShellTokens t,
+    ThemeData theme,
+    String label, {
+    required VoidCallback onTap,
+    bool danger = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: danger ? t.statusError : t.accentPrimary,
           ),
         ),
       ),

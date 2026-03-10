@@ -45,6 +45,25 @@ async function deriveLightRagScope(req, openclawId) {
   };
 }
 
+function lightRagHeaders(scope) {
+  return {
+    Authorization: `Bearer ${LIGHTRAG_INTERNAL_TOKEN}`,
+    'X-Trinity-Tenant': String(scope.tenantId),
+    'X-Trinity-Workspace': String(scope.workspaceId),
+    'X-Trinity-Openclaw': String(scope.openclawId),
+    'X-Trinity-User': String(scope.userId),
+  };
+}
+
+async function readUpstreamJsonOrText(response) {
+  const raw = await response.text();
+  try {
+    return { raw, json: JSON.parse(raw) };
+  } catch (_) {
+    return { raw, json: null };
+  }
+}
+
 async function fetchAssignedOpenClawsForUser(userId) {
   const orchRes = await fetch(`${ORCHESTRATOR_URL}/users/${userId}/openclaws`, {
     headers: { Authorization: `Bearer ${ORCHESTRATOR_SERVICE_TOKEN}` },
@@ -247,6 +266,14 @@ router.get('/openclaws/:id/lightrag-graph', async (req, res) => {
       labels = [];
     }
 
+    if (!Array.isArray(labels) || labels.length === 0) {
+      console.warn('[auth] LightRAG returned no labels for scope', {
+        tenantId: scope.tenantId,
+        openclawId: scope.openclawId,
+        workspaceId: scope.workspaceId,
+      });
+    }
+
     const selectedLabel = (req.query.label || labels[0] || '').toString();
     if (!selectedLabel) {
       return res.json({
@@ -255,6 +282,12 @@ router.get('/openclaws/:id/lightrag-graph', async (req, res) => {
         workspaceId: scope.workspaceId,
         labels,
         selectedLabel: null,
+        graphMeta: {
+          selectedLabel: null,
+          nodeCount: 0,
+          edgeCount: 0,
+          isEmpty: true,
+        },
         graph: { nodes: [], edges: [] },
       });
     }
@@ -279,17 +312,228 @@ router.get('/openclaws/:id/lightrag-graph', async (req, res) => {
       graph = { nodes: [], edges: [] };
     }
 
+    const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+    const edges = Array.isArray(graph?.edges) ? graph.edges : [];
+    const graphMeta = {
+      selectedLabel,
+      nodeCount: nodes.length,
+      edgeCount: edges.length,
+      isEmpty: nodes.length === 0 && edges.length === 0,
+    };
+
+    if (graphMeta.isEmpty) {
+      console.warn('[auth] LightRAG returned empty graph', {
+        tenantId: scope.tenantId,
+        openclawId: scope.openclawId,
+        workspaceId: scope.workspaceId,
+        selectedLabel,
+        maxDepth: Number(req.query.max_depth || 3),
+        maxNodes: Number(req.query.max_nodes || 500),
+      });
+    }
+
     res.json({
       tenantId: scope.tenantId,
       openclawId: scope.openclawId,
       workspaceId: scope.workspaceId,
       labels,
       selectedLabel,
+      graphMeta,
       graph,
     });
   } catch (err) {
     const statusCode = err.status || 500;
     res.status(statusCode).json({ error: err.message || 'Failed to fetch LightRAG graph' });
+  }
+});
+
+// GET /auth/openclaws/:id/lightrag-documents - list documents in scoped workspace
+router.get('/openclaws/:id/lightrag-documents', async (req, res) => {
+  try {
+    const openclawId = req.params.id;
+    const scope = await deriveLightRagScope(req, openclawId);
+
+    if (!LIGHTRAG_INTERNAL_TOKEN) {
+      return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
+    }
+
+    const url = new URL(`${LIGHTRAG_URL}/documents`);
+    for (const key of ['status', 'type', 'q', 'limit', 'offset']) {
+      const value = req.query[key];
+      if (value != null && `${value}`.trim() !== '') {
+        url.searchParams.set(key, `${value}`);
+      }
+    }
+
+    const upstream = await fetch(url, { headers: lightRagHeaders(scope) });
+    const { raw, json } = await readUpstreamJsonOrText(upstream);
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: raw || 'Failed to list LightRAG documents' });
+    }
+
+    const documents = Array.isArray(json) ? json : [];
+    return res.json({
+      tenantId: scope.tenantId,
+      openclawId: scope.openclawId,
+      workspaceId: scope.workspaceId,
+      count: documents.length,
+      documents,
+    });
+  } catch (err) {
+    const statusCode = err.status || 500;
+    return res.status(statusCode).json({ error: err.message || 'Failed to list LightRAG documents' });
+  }
+});
+
+// POST /auth/openclaws/:id/lightrag-documents - upload/register document
+router.post('/openclaws/:id/lightrag-documents', async (req, res) => {
+  try {
+    const openclawId = req.params.id;
+    const scope = await deriveLightRagScope(req, openclawId);
+
+    if (!LIGHTRAG_INTERNAL_TOKEN) {
+      return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
+    }
+
+    const contentType = String(req.headers['content-type'] || '');
+    if (!contentType.toLowerCase().includes('multipart/form-data')) {
+      return res.status(400).json({ error: 'multipart/form-data is required' });
+    }
+
+    const upstreamHeaders = {
+      ...lightRagHeaders(scope),
+      'Content-Type': contentType,
+    };
+    if (req.headers['content-length']) {
+      upstreamHeaders['Content-Length'] = String(req.headers['content-length']);
+    }
+
+    const upstream = await fetch(`${LIGHTRAG_URL}/documents`, {
+      method: 'POST',
+      headers: upstreamHeaders,
+      body: req,
+      duplex: 'half',
+    });
+
+    const { raw, json } = await readUpstreamJsonOrText(upstream);
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: raw || 'Failed to upload LightRAG document' });
+    }
+
+    return res.status(201).json(json || {});
+  } catch (err) {
+    const statusCode = err.status || 500;
+    return res.status(statusCode).json({ error: err.message || 'Failed to upload LightRAG document' });
+  }
+});
+
+// POST /auth/openclaws/:id/lightrag-documents/:documentId/ingest - index a document
+router.post('/openclaws/:id/lightrag-documents/:documentId/ingest', async (req, res) => {
+  try {
+    const openclawId = req.params.id;
+    const documentId = req.params.documentId;
+    const scope = await deriveLightRagScope(req, openclawId);
+
+    if (!LIGHTRAG_INTERNAL_TOKEN) {
+      return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
+    }
+
+    const upstream = await fetch(`${LIGHTRAG_URL}/documents/${encodeURIComponent(documentId)}/ingest`, {
+      method: 'POST',
+      headers: lightRagHeaders(scope),
+    });
+
+    const { raw, json } = await readUpstreamJsonOrText(upstream);
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: raw || 'Failed to ingest LightRAG document' });
+    }
+
+    return res.json(json || {});
+  } catch (err) {
+    const statusCode = err.status || 500;
+    return res.status(statusCode).json({ error: err.message || 'Failed to ingest LightRAG document' });
+  }
+});
+
+// GET /auth/openclaws/:id/lightrag-documents/:documentId/status - fetch document status
+router.get('/openclaws/:id/lightrag-documents/:documentId/status', async (req, res) => {
+  try {
+    const openclawId = req.params.id;
+    const documentId = req.params.documentId;
+    const scope = await deriveLightRagScope(req, openclawId);
+
+    if (!LIGHTRAG_INTERNAL_TOKEN) {
+      return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
+    }
+
+    const upstream = await fetch(`${LIGHTRAG_URL}/documents/${encodeURIComponent(documentId)}/status`, {
+      headers: lightRagHeaders(scope),
+    });
+
+    const { raw, json } = await readUpstreamJsonOrText(upstream);
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: raw || 'Failed to fetch document status' });
+    }
+
+    return res.json(json || {});
+  } catch (err) {
+    const statusCode = err.status || 500;
+    return res.status(statusCode).json({ error: err.message || 'Failed to fetch document status' });
+  }
+});
+
+// GET /auth/openclaws/:id/lightrag-documents/:documentId/chunks - fetch document chunks
+router.get('/openclaws/:id/lightrag-documents/:documentId/chunks', async (req, res) => {
+  try {
+    const openclawId = req.params.id;
+    const documentId = req.params.documentId;
+    const scope = await deriveLightRagScope(req, openclawId);
+
+    if (!LIGHTRAG_INTERNAL_TOKEN) {
+      return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
+    }
+
+    const upstream = await fetch(`${LIGHTRAG_URL}/documents/${encodeURIComponent(documentId)}/chunks`, {
+      headers: lightRagHeaders(scope),
+    });
+
+    const { raw, json } = await readUpstreamJsonOrText(upstream);
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: raw || 'Failed to fetch document chunks' });
+    }
+
+    return res.json(json || {});
+  } catch (err) {
+    const statusCode = err.status || 500;
+    return res.status(statusCode).json({ error: err.message || 'Failed to fetch document chunks' });
+  }
+});
+
+// DELETE /auth/openclaws/:id/lightrag-documents/:documentId - delete document from workspace + index
+router.delete('/openclaws/:id/lightrag-documents/:documentId', async (req, res) => {
+  try {
+    const openclawId = req.params.id;
+    const documentId = req.params.documentId;
+    const scope = await deriveLightRagScope(req, openclawId);
+
+    if (!LIGHTRAG_INTERNAL_TOKEN) {
+      return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
+    }
+
+    const upstream = await fetch(`${LIGHTRAG_URL}/documents/${encodeURIComponent(documentId)}`, {
+      method: 'DELETE',
+      headers: lightRagHeaders(scope),
+    });
+
+    const { raw, json } = await readUpstreamJsonOrText(upstream);
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: raw || 'Failed to delete document' });
+    }
+
+    return res.json(json || { document_id: documentId, deleted: true });
+  } catch (err) {
+    const statusCode = err.status || 500;
+    return res.status(statusCode).json({ error: err.message || 'Failed to delete document' });
   }
 });
 

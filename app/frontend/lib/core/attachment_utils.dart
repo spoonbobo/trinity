@@ -210,17 +210,24 @@ class FileUploadResult {
 ///   Authorization: Bearer <jwt>
 ///   Content-Type: <mime-type>
 ///   X-File-Name: <url-encoded-filename>
+///   ?openclaw=<openclawId>
 ///
 /// [authToken] is the user's JWT — the gateway proxy swaps it for the
 /// per-user gateway token before forwarding the request.
+/// [openclawId] identifies the target OpenClaw instance (required for
+/// the gateway-proxy to route the request to the correct per-user pod).
 Future<FileUploadResult> uploadFileToWorkspace({
   required Uint8List bytes,
   required String fileName,
   required String mimeType,
   required String authToken,
+  String? openclawId,
 }) async {
   // Build the upload URL relative to the current origin
-  final uri = Uri.parse('${html.window.location.origin}/__openclaw__/upload');
+  final base = Uri.parse('${html.window.location.origin}/__openclaw__/upload');
+  final uri = openclawId != null && openclawId.isNotEmpty
+      ? base.replace(queryParameters: {'openclaw': openclawId})
+      : base;
 
   final request = html.HttpRequest();
   request.open('POST', uri.toString());

@@ -88,7 +88,10 @@ spec:
             - name: AUTHENTIK_CLIENT_ID
               value: {{ .Values.keycloak.authentik.clientId | quote }}
             - name: AUTHENTIK_CLIENT_SECRET
-              value: {{ .Values.keycloak.authentik.clientSecret | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: AUTHENTIK_CLIENT_SECRET
             - name: AUTHENTIK_SCOPES
               value: {{ .Values.keycloak.authentik.scopes | quote }}
             - name: AUTHENTIK_GROUPS_MAPPER_ENABLED
@@ -208,7 +211,10 @@ spec:
             - name: AUTHENTIK_CLIENT_ID
               value: {{ .Values.keycloak.authentik.clientId | quote }}
             - name: AUTHENTIK_CLIENT_SECRET
-              value: {{ .Values.keycloak.authentik.clientSecret | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: AUTHENTIK_CLIENT_SECRET
             - name: AUTHENTIK_SCOPES
               value: {{ .Values.keycloak.authentik.scopes | quote }}
             - name: AUTHENTIK_GROUPS_MAPPER_ENABLED

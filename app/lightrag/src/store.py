@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -90,6 +91,12 @@ class WorkspaceStore:
         for path in self.documents_dir(workspace_id).glob("*/metadata.json"):
             items.append(DocumentRecord.model_validate_json(path.read_text(encoding="utf-8")))
         return sorted(items, key=lambda item: item.created_at)
+
+    def delete_document(self, workspace_id: str, document_id: str) -> None:
+        path = self.documents_dir(workspace_id) / document_id
+        if not path.exists():
+            return
+        shutil.rmtree(path)
 
     def save_run_report(self, report: TenderCheckReport) -> Path:
         path = self.runs_dir(report.workspace_id) / f"{report.run_id}.json"

@@ -4,6 +4,13 @@ global:
   imagePullPolicy: IfNotPresent
   storageClass: standard
 
+# ─── Secrets ──────────────────────────────────────────────────────────────
+# Do NOT commit real secrets here. For local dev, run:
+#   ./k8s/seed-dev-secrets.sh --port-forward
+# to populate Vault, then helm upgrade triggers vault-sync.
+#
+# For first install only (bootstrap), pass via --set or use the seed script.
+# After vault-init + vault-sync run, these are overwritten from Vault.
 secrets:
   supabaseJwtSecret: "trinity-dev-jwt-secret-at-least-32-chars-long!!"
   supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJpYXQiOjE3MDk0MDAwMDAsImV4cCI6MTg2NzA4MDAwMH0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE"
@@ -14,15 +21,18 @@ secrets:
   vaultToken: "root"
   orchestratorServiceToken: "trinity-orchestrator-token-123"
   zenApiKey: ""
-  lightragInternalToken: ""
+  lightragInternalToken: "trinity-lightrag-internal-token-123"
   lightragLlmApiKey: ""
   lightragEmbeddingApiKey: ""
+  poeApiKey: ""
+  authentikClientSecret: ""
 
 urls:
   apiExternalUrl: "http://localhost"
   siteUrl: "http://localhost"
   allowedOrigins: "http://localhost"
 
+# Superadmin bootstrap (for first install; overwritten by vault-sync after)
 superadmin:
   enabled: true
   email: "admin@trinity.work"

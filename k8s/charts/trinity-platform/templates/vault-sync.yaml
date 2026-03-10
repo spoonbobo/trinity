@@ -1,0 +1,175 @@
+# ─── Vault Sync Job ───────────────────────────────────────────────────────
+# Runs after vault-init. Reads ALL secrets from Vault and patches the
+# trinity-secrets + trinity-superadmin K8s Secrets so that all services
+# consume secrets from Vault as the single source of truth.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-sync-{{ .Release.Revision }}
+  namespace: {{ include "trinity.namespace" . }}
+  labels:
+    {{- include "trinity.componentLabels" (dict "component" "vault-sync" "Release" .Release "Chart" .Chart) | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "trinity.componentLabels" (dict "component" "vault-sync" "Release" .Release "Chart" .Chart) | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: vault-sync
+      containers:
+        - name: vault-sync
+          image: bitnami/kubectl:latest
+          command: ["/bin/bash", "/scripts/sync.sh"]
+          env:
+            - name: VAULT_ADDR
+              value: "http://vault:8200"
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: VAULT_TOKEN
+            - name: NAMESPACE
+              value: {{ include "trinity.namespace" . }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+          resources:
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: scripts
+          configMap:
+            name: vault-sync-scripts
+---
+# ServiceAccount + RBAC for vault-sync to patch K8s Secrets
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault-sync
+  namespace: {{ include "trinity.namespace" . }}
+  labels:
+    {{- include "trinity.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vault-sync
+  namespace: {{ include "trinity.namespace" . }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["trinity-secrets", "trinity-superadmin"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vault-sync
+  namespace: {{ include "trinity.namespace" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: vault-sync
+subjects:
+  - kind: ServiceAccount
+    name: vault-sync
+    namespace: {{ include "trinity.namespace" . }}
+---
+# ─── Vault Sync Script ────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-sync-scripts
+  namespace: {{ include "trinity.namespace" . }}
+  labels:
+    {{- include "trinity.labels" . | nindent 4 }}
+data:
+  sync.sh: |
+    #!/bin/bash
+    set -e
+    VAULT_ADDR="${VAULT_ADDR:-http://vault:8200}"
+    VAULT_TOKEN="${VAULT_TOKEN:-root}"
+    NAMESPACE="${NAMESPACE:-trinity}"
+
+    echo "[vault-sync] Waiting for Vault..."
+    count=0
+    while [ $count -lt 30 ]; do
+      HTTP=$(curl -s -o /dev/null -w "%{http_code}" "$VAULT_ADDR/v1/sys/health" 2>/dev/null || echo "000")
+      if [ "$HTTP" = "200" ]; then break; fi
+      sleep 2; count=$((count + 1))
+    done
+    if [ $count -ge 30 ]; then echo "[vault-sync] Timeout"; exit 1; fi
+    echo "[vault-sync] Vault is ready"
+
+    # Helper: read a Vault KV v2 field via HTTP API
+    vget() {
+      local path="$1" field="$2"
+      curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
+        "$VAULT_ADDR/v1/secret/data/trinity/$path" \
+        | sed -n "s/.*\"$field\":\"\([^\"]*\)\".*/\1/p" \
+        || echo ""
+    }
+
+    echo "[vault-sync] Reading secrets from Vault..."
+
+    SUP_JWT=$(vget supabase jwt_secret)
+    SUP_ANON=$(vget supabase anon_key)
+    SUP_PG=$(vget supabase postgres_password)
+    KC_ADMIN=$(vget keycloak admin)
+    KC_CLIENT=$(vget keycloak client_secret)
+    KC_AUTHENTIK=$(vget keycloak authentik_client_secret)
+    SA_ALLOW=$(vget superadmin allowlist)
+    SA_ENABLED=$(vget superadmin enabled)
+    SA_EMAIL=$(vget superadmin email)
+    SA_PASS=$(vget superadmin password)
+    ORCH_TOKEN=$(vget orchestrator service_token)
+    GF_PASS=$(vget grafana password)
+    LR_TOKEN=$(vget lightrag internal_token)
+    LR_LLM=$(vget lightrag llm_api_key)
+    LR_EMBED=$(vget lightrag embedding_api_key)
+    ZEN_KEY=$(vget copilot zen_api_key)
+    POE_KEY=$(vget openclaw poe_api_key)
+    VAULT_TK="${VAULT_TOKEN}"
+
+    echo "[vault-sync] Patching trinity-secrets via kubectl..."
+
+    kubectl patch secret trinity-secrets -n "$NAMESPACE" --type merge -p "{
+      \"stringData\": {
+        \"SUPABASE_JWT_SECRET\": \"$SUP_JWT\",
+        \"SUPABASE_ANON_KEY\": \"$SUP_ANON\",
+        \"SUPABASE_POSTGRES_PASSWORD\": \"$SUP_PG\",
+        \"KEYCLOAK_ADMIN_PASSWORD\": \"$KC_ADMIN\",
+        \"KEYCLOAK_CLIENT_SECRET\": \"$KC_CLIENT\",
+        \"AUTHENTIK_CLIENT_SECRET\": \"$KC_AUTHENTIK\",
+        \"GRAFANA_PASSWORD\": \"$GF_PASS\",
+        \"VAULT_TOKEN\": \"$VAULT_TK\",
+        \"ORCHESTRATOR_SERVICE_TOKEN\": \"$ORCH_TOKEN\",
+        \"ZEN_API_KEY\": \"$ZEN_KEY\",
+        \"LIGHTRAG_INTERNAL_TOKEN\": \"$LR_TOKEN\",
+        \"LIGHTRAG_LLM_API_KEY\": \"$LR_LLM\",
+        \"LIGHTRAG_EMBEDDING_API_KEY\": \"$LR_EMBED\",
+        \"POE_API_KEY\": \"$POE_KEY\"
+      }
+    }" && echo "[vault-sync] trinity-secrets patched" \
+       || echo "[vault-sync] WARN: failed to patch trinity-secrets"
+
+    echo "[vault-sync] Patching trinity-superadmin..."
+
+    kubectl patch secret trinity-superadmin -n "$NAMESPACE" --type merge -p "{
+      \"stringData\": {
+        \"SUPERADMIN_ALLOWLIST\": \"$SA_ALLOW\",
+        \"ENABLE_DEFAULT_SUPERADMIN\": \"$SA_ENABLED\",
+        \"DEFAULT_SUPERADMIN_EMAIL\": \"$SA_EMAIL\",
+        \"DEFAULT_SUPERADMIN_PASSWORD\": \"$SA_PASS\"
+      }
+    }" && echo "[vault-sync] trinity-superadmin patched" \
+       || echo "[vault-sync] WARN: failed to patch trinity-superadmin"
+
+    echo "[vault-sync] Done — K8s Secrets now reflect Vault state"
