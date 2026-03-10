@@ -95,6 +95,11 @@ spec:
                 secretKeyRef:
                   name: trinity-secrets
                   key: LIGHTRAG_INTERNAL_TOKEN
+            - name: DELEGATION_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: DELEGATION_JWT_SECRET
           livenessProbe:
             httpGet:
               path: /auth/health

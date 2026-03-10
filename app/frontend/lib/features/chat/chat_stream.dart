@@ -182,6 +182,7 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
   bool _showScrollToBottom = false;
   String _currentSession = 'main';
   bool _historyLoading = false; // Guard against concurrent history fetches
+  int _lastRefreshTick = 0;
   final List<_PendingUserEcho> _pendingUserEchoes = [];
   bool _disposed = false;
   gw.GatewayClient? _cachedClient; // Stored at subscribe time to avoid ref after dispose
@@ -937,6 +938,12 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
       _currentSession = sessionKey;
       _entries.clear();
       _agentThinking = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadHistory());
+    }
+
+    final refreshTick = ref.watch(chatRefreshTickProvider);
+    if (refreshTick != _lastRefreshTick) {
+      _lastRefreshTick = refreshTick;
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadHistory());
     }
 

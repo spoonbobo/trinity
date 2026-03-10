@@ -434,6 +434,10 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     );
   }
 
+  void _refreshActiveSession() {
+    ref.read(chatRefreshTickProvider.notifier).state++;
+  }
+
   void _showOpenClawSwitcher({
     required List<OpenClawInfo> openclaws,
     required String? activeId,
@@ -815,18 +819,32 @@ class _ShellPageState extends ConsumerState<ShellPage> {
                       openclaws: authState.openclaws,
                       activeId: authState.activeOpenClawId,
                     ),
+                    onRefreshTap: _refreshActiveSession,
                     onTap: _showCopilotDialog,
                     t: t,
                   ),
                 ] else
-                  _StatusModeActionLink(
-                    label: tr(language, 'switch_claw'),
-                    onTap: () => _showOpenClawSwitcher(
-                      openclaws: authState.openclaws,
-                      activeId: authState.activeOpenClawId,
-                    ),
-                    t: t,
-                    textColor: t.accentPrimary,
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _StatusModeActionLink(
+                        label: tr(language, 'switch_claw'),
+                        onTap: () => _showOpenClawSwitcher(
+                          openclaws: authState.openclaws,
+                          activeId: authState.activeOpenClawId,
+                        ),
+                        t: t,
+                        textColor: t.accentPrimary,
+                      ),
+                      const SizedBox(width: 8),
+                      _StatusIconActionLink(
+                        label: 'refresh-chat',
+                        icon: Icons.refresh,
+                        onTap: _refreshActiveSession,
+                        t: t,
+                        textColor: t.accentPrimary,
+                      ),
+                    ],
                   ),
               ],
             ],
@@ -914,6 +932,7 @@ class _ConfigureWithCopilotLink extends StatelessWidget {
   final String configureLabel;
   final String switchLabel;
   final VoidCallback onSwitchTap;
+  final VoidCallback onRefreshTap;
   final VoidCallback onTap;
   final ShellTokens t;
 
@@ -923,6 +942,7 @@ class _ConfigureWithCopilotLink extends StatelessWidget {
     required this.configureLabel,
     required this.switchLabel,
     required this.onSwitchTap,
+    required this.onRefreshTap,
     required this.onTap,
     required this.t,
   });
@@ -983,7 +1003,57 @@ class _ConfigureWithCopilotLink extends StatelessWidget {
             ),
           ),
         ),
+        const SizedBox(width: 8),
+        _StatusIconActionLink(
+          label: 'refresh-chat',
+          icon: Icons.refresh,
+          onTap: onRefreshTap,
+          t: t,
+          textColor: t.accentPrimary,
+        ),
       ],
+    );
+  }
+}
+
+class _StatusIconActionLink extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final ShellTokens t;
+  final Color textColor;
+
+  const _StatusIconActionLink({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    required this.t,
+    required this.textColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return GestureDetector(
+      onTap: onTap,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: textColor),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: textColor,
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

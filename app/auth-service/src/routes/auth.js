@@ -12,7 +12,122 @@ const ORCHESTRATOR_URL = process.env.ORCHESTRATOR_URL;
 const ORCHESTRATOR_SERVICE_TOKEN = process.env.ORCHESTRATOR_SERVICE_TOKEN;
 const LIGHTRAG_URL = process.env.LIGHTRAG_URL || 'http://lightrag:18803';
 const LIGHTRAG_INTERNAL_TOKEN = process.env.LIGHTRAG_INTERNAL_TOKEN || '';
+const DELEGATION_JWT_SECRET = process.env.DELEGATION_JWT_SECRET || process.env.OPENCLAW_DELEGATION_SECRET || '';
 const GUEST_JWT_TTL = 3600; // 1 hour
+
+const DELEGATION_ISSUER = 'trinity-auth-service';
+const DELEGATION_AUDIENCE = 'trinity-openclaw';
+const DELEGATION_TTL_SECONDS = Math.max(60, Number(process.env.DELEGATION_JWT_TTL_SECONDS || 600));
+
+const SCOPE_LIGHTRAG_READ = 'lightrag.read';
+const SCOPE_LIGHTRAG_WRITE = 'lightrag.write';
+const DEFAULT_DELEGATION_SCOPES = [SCOPE_LIGHTRAG_READ, SCOPE_LIGHTRAG_WRITE];
+
+function headerValue(req, name) {
+  const raw = req.headers[name];
+  if (Array.isArray(raw)) return raw[0] || '';
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+function extractDelegationToken(req) {
+  return headerValue(req, 'x-trinity-delegation');
+}
+
+function extractOpenClawGatewayToken(req) {
+  return headerValue(req, 'x-openclaw-gateway-token');
+}
+
+function hasDelegationToken(req) {
+  return extractDelegationToken(req).length > 0;
+}
+
+function hasOpenClawGatewayToken(req) {
+  return extractOpenClawGatewayToken(req).length > 0;
+}
+
+function parseDelegationScopes(value) {
+  if (Array.isArray(value)) {
+    return value.map((v) => String(v || '').trim()).filter(Boolean);
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return value
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function verifyDelegationToken(req, expectedOpenclawId) {
+  const token = extractDelegationToken(req);
+  if (!token) {
+    const err = new Error('authentication required');
+    err.status = 401;
+    throw err;
+  }
+  if (!DELEGATION_JWT_SECRET) {
+    const err = new Error('delegation auth is not configured');
+    err.status = 503;
+    throw err;
+  }
+
+  let claims;
+  try {
+    claims = jwt.verify(token, DELEGATION_JWT_SECRET, {
+      algorithms: ['HS256'],
+      issuer: DELEGATION_ISSUER,
+      audience: DELEGATION_AUDIENCE,
+    });
+  } catch (_) {
+    const err = new Error('invalid delegation token');
+    err.status = 401;
+    throw err;
+  }
+
+  const userId = String(claims?.sub || '').trim();
+  const openclawId = String(claims?.openclaw_id || '').trim();
+  const sessionKey = String(claims?.session_key || '').trim();
+  const scopes = parseDelegationScopes(claims?.scope);
+
+  if (!userId || !openclawId) {
+    const err = new Error('invalid delegation token claims');
+    err.status = 401;
+    throw err;
+  }
+
+  if (expectedOpenclawId && openclawId !== expectedOpenclawId) {
+    const err = new Error('delegation token openclaw mismatch');
+    err.status = 403;
+    throw err;
+  }
+
+  return {
+    userId,
+    openclawId,
+    sessionKey,
+    scopes,
+    jti: String(claims?.jti || ''),
+    delegated: true,
+  };
+}
+
+function ensureDelegatedScope(actor, requiredScope) {
+  if (!actor?.delegated) return;
+  if ((actor.scopes || []).includes(requiredScope)) return;
+  const err = new Error('delegation scope denied');
+  err.status = 403;
+  throw err;
+}
+
+function timingSafeEqualString(a, b) {
+  const aa = Buffer.from(String(a || ''));
+  const bb = Buffer.from(String(b || ''));
+  if (aa.length !== bb.length) {
+    crypto.timingSafeEqual(aa, aa);
+    return false;
+  }
+  return crypto.timingSafeEqual(aa, bb);
+}
 
 function normalizeWorkspacePart(value) {
   return String(value || '')
@@ -20,6 +135,10 @@ function normalizeWorkspacePart(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'default';
+}
+
+function looksLikeUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
 }
 
 function buildOpenClawWorkspace(tenantId, openclawId, suffix = '') {
@@ -32,16 +151,105 @@ function deriveTenantIdFromOpenClaw(openclaw, fallbackUserId) {
   return openclaw?.created_by || openclaw?.createdBy || fallbackUserId || openclaw?.id;
 }
 
+async function assertDelegatedOpenClawAccess(delegation, openclawId) {
+  if (!delegation?.userId) {
+    const err = new Error('authentication required');
+    err.status = 401;
+    throw err;
+  }
+  if (delegation.openclawId !== openclawId) {
+    const err = new Error('delegation token openclaw mismatch');
+    err.status = 403;
+    throw err;
+  }
+  const claws = await fetchAssignedOpenClawsForUser(delegation.userId);
+  if (!claws.some((c) => c.id === openclawId)) {
+    const err = new Error('not assigned to this openclaw');
+    err.status = 403;
+    throw err;
+  }
+}
+
+async function fetchResolvedOpenClawBackend(openclawId) {
+  const orchRes = await fetch(`${ORCHESTRATOR_URL}/openclaws/${openclawId}/resolve`, {
+    headers: { Authorization: `Bearer ${ORCHESTRATOR_SERVICE_TOKEN}` },
+  });
+
+  if (!orchRes.ok) {
+    const err = new Error(`Failed to resolve openclaw ${openclawId}: ${orchRes.status}`);
+    err.status = orchRes.status;
+    throw err;
+  }
+
+  return orchRes.json();
+}
+
+async function resolveOpenClawServiceActor(req, openclawId) {
+  const presentedToken = extractOpenClawGatewayToken(req);
+  if (!presentedToken) {
+    const err = new Error('authentication required');
+    err.status = 401;
+    throw err;
+  }
+
+  const backend = await fetchResolvedOpenClawBackend(openclawId);
+  const expectedToken = String(backend?.token || '');
+  if (!expectedToken || !timingSafeEqualString(presentedToken, expectedToken)) {
+    const err = new Error('invalid openclaw gateway token');
+    err.status = 401;
+    throw err;
+  }
+
+  return {
+    userId: `service:${openclawId}`,
+    openclawId,
+    delegated: false,
+    serviceActor: true,
+    scopes: DEFAULT_DELEGATION_SCOPES,
+    sessionKey: null,
+    jti: null,
+  };
+}
+
+async function resolveOpenClawActor(req, openclawId) {
+  if (req.user?.id && !req.user?.isGuest) {
+    await assertOpenClawAccess(req, openclawId);
+    return {
+      userId: req.user.id,
+      delegated: false,
+      scopes: DEFAULT_DELEGATION_SCOPES,
+      sessionKey: null,
+      jti: null,
+    };
+  }
+
+  if (hasDelegationToken(req)) {
+    const delegation = verifyDelegationToken(req, openclawId);
+    await assertDelegatedOpenClawAccess(delegation, openclawId);
+    return delegation;
+  }
+
+  if (hasOpenClawGatewayToken(req)) {
+    return resolveOpenClawServiceActor(req, openclawId);
+  }
+
+  const err = new Error('authentication required');
+  err.status = 401;
+  throw err;
+}
+
 async function deriveLightRagScope(req, openclawId) {
-  await assertOpenClawAccess(req, openclawId);
-  const openclaw = await fetchOpenClawById(openclawId);
-  const tenantId = deriveTenantIdFromOpenClaw(openclaw, req.user.id);
-  const workspaceId = buildOpenClawWorkspace(tenantId, openclawId);
+  const canonicalOpenclawId = await resolveOpenClawId(openclawId);
+  const actor = await resolveOpenClawActor(req, canonicalOpenclawId);
+  const openclaw = await fetchOpenClawById(canonicalOpenclawId);
+  const tenantId = deriveTenantIdFromOpenClaw(openclaw, actor.userId);
+  const workspaceId = buildOpenClawWorkspace(tenantId, canonicalOpenclawId);
   return {
     tenantId,
-    openclawId,
+    openclawId: canonicalOpenclawId,
     workspaceId,
-    userId: req.user.id,
+    userId: actor.userId,
+    actor,
   };
 }
 
@@ -110,6 +318,52 @@ async function fetchOpenClawById(openclawId) {
   return orchRes.json();
 }
 
+async function listAllOpenClaws() {
+  const orchRes = await fetch(`${ORCHESTRATOR_URL}/openclaws`, {
+    headers: { Authorization: `Bearer ${ORCHESTRATOR_SERVICE_TOKEN}` },
+  });
+
+  if (!orchRes.ok) {
+    const err = new Error(`Failed to list openclaws: ${orchRes.status}`);
+    err.status = orchRes.status;
+    throw err;
+  }
+
+  return orchRes.json();
+}
+
+async function resolveOpenClawId(inputId) {
+  const raw = String(inputId || '').trim();
+  if (!raw) {
+    const err = new Error('openclaw id is required');
+    err.status = 400;
+    throw err;
+  }
+  if (looksLikeUuid(raw)) return raw;
+
+  const list = await listAllOpenClaws();
+  const hit = (list || []).find((oc) => {
+    const candidates = [
+      oc?.id,
+      oc?.name,
+      oc?.service_name,
+      oc?.serviceName,
+      oc?.pod_name,
+      oc?.podName,
+    ]
+      .map((v) => String(v || '').trim())
+      .filter(Boolean);
+    return candidates.includes(raw);
+  });
+
+  if (!hit?.id) {
+    const err = new Error(`unknown openclaw id: ${raw}`);
+    err.status = 404;
+    throw err;
+  }
+  return String(hit.id);
+}
+
 async function listDrawIOSnapshots(openclawId, userId) {
   const { rows } = await pool.query(
     `select id, name, xml, xml_hash, created_at, updated_at
@@ -149,6 +403,9 @@ router.get('/permissions', (req, res) => {
 // GET /auth/openclaws - list OpenClaws assigned to the current user
 router.get('/openclaws', async (req, res) => {
   try {
+    if (!req.user?.id || req.user?.isGuest) {
+      return res.status(401).json({ error: 'authentication required' });
+    }
     const userId = req.user.id;
     const openclaws = await fetchAssignedOpenClawsForUser(userId);
 
@@ -179,6 +436,9 @@ router.get('/openclaws', async (req, res) => {
 // GET /auth/openclaws/:id/status - get status of a specific OpenClaw
 router.get('/openclaws/:id/status', async (req, res) => {
   try {
+    if (!req.user?.id || req.user?.isGuest) {
+      return res.status(401).json({ error: 'authentication required' });
+    }
     const userId = req.user.id;
     const openclawId = req.params.id;
 
@@ -222,11 +482,69 @@ router.get('/openclaws/:id/status', async (req, res) => {
   }
 });
 
+// POST /auth/openclaws/:id/delegation-token - mint short-lived scoped token for svc-to-svc delegation
+router.post('/openclaws/:id/delegation-token', async (req, res) => {
+  try {
+    if (!req.user?.id || req.user?.isGuest) {
+      return res.status(401).json({ error: 'authentication required' });
+    }
+    if (!DELEGATION_JWT_SECRET) {
+      return res.status(503).json({ error: 'delegation auth is not configured' });
+    }
+
+    const openclawId = await resolveOpenClawId(req.params.id);
+    await assertOpenClawAccess(req, openclawId);
+
+    const body = (req.body && typeof req.body === 'object') ? req.body : {};
+    const requestedScopes = parseDelegationScopes(body.scope);
+    const allowedScopes = new Set(DEFAULT_DELEGATION_SCOPES);
+    const scopes = (requestedScopes.length ? requestedScopes : DEFAULT_DELEGATION_SCOPES)
+      .filter((s) => allowedScopes.has(s));
+    if (scopes.length === 0) {
+      return res.status(400).json({ error: 'scope must include at least one allowed value' });
+    }
+
+    const sessionKey = (body.session_key || '').toString().trim();
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      sub: req.user.id,
+      openclaw_id: openclawId,
+      session_key: sessionKey || undefined,
+      scope: scopes,
+      jti: uuidv4(),
+      iat: now,
+      nbf: now,
+      exp: now + DELEGATION_TTL_SECONDS,
+      iss: DELEGATION_ISSUER,
+      aud: DELEGATION_AUDIENCE,
+    };
+
+    const token = jwt.sign(payload, DELEGATION_JWT_SECRET, { algorithm: 'HS256' });
+    return res.json({
+      token,
+      token_type: 'Bearer',
+      expires_in: DELEGATION_TTL_SECONDS,
+      openclaw_id: openclawId,
+      scope: scopes,
+      session_key: sessionKey || null,
+    });
+  } catch (err) {
+    const statusCode = err.status || 500;
+    return res.status(statusCode).json({ error: err.message || 'Failed to mint delegation token' });
+  }
+});
+
 // GET /auth/openclaws/:id/lightrag-scope - derive the canonical LightRAG scope for this OpenClaw
 router.get('/openclaws/:id/lightrag-scope', async (req, res) => {
   try {
     const openclawId = req.params.id;
-    res.json(await deriveLightRagScope(req, openclawId));
+    const scope = await deriveLightRagScope(req, openclawId);
+    res.json({
+      tenantId: scope.tenantId,
+      openclawId: scope.openclawId,
+      workspaceId: scope.workspaceId,
+      userId: scope.userId,
+    });
   } catch (err) {
     const statusCode = err.status || 500;
     res.status(statusCode).json({ error: err.message || 'Failed to derive LightRAG scope' });
@@ -237,6 +555,7 @@ router.get('/openclaws/:id/lightrag-graph', async (req, res) => {
   try {
     const openclawId = req.params.id;
     const scope = await deriveLightRagScope(req, openclawId);
+    ensureDelegatedScope(scope.actor, SCOPE_LIGHTRAG_READ);
 
     if (!LIGHTRAG_INTERNAL_TOKEN) {
       return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
@@ -352,6 +671,7 @@ router.get('/openclaws/:id/lightrag-documents', async (req, res) => {
   try {
     const openclawId = req.params.id;
     const scope = await deriveLightRagScope(req, openclawId);
+    ensureDelegatedScope(scope.actor, SCOPE_LIGHTRAG_READ);
 
     if (!LIGHTRAG_INTERNAL_TOKEN) {
       return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
@@ -390,6 +710,7 @@ router.post('/openclaws/:id/lightrag-documents', async (req, res) => {
   try {
     const openclawId = req.params.id;
     const scope = await deriveLightRagScope(req, openclawId);
+    ensureDelegatedScope(scope.actor, SCOPE_LIGHTRAG_WRITE);
 
     if (!LIGHTRAG_INTERNAL_TOKEN) {
       return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
@@ -433,6 +754,7 @@ router.post('/openclaws/:id/lightrag-documents/:documentId/ingest', async (req, 
     const openclawId = req.params.id;
     const documentId = req.params.documentId;
     const scope = await deriveLightRagScope(req, openclawId);
+    ensureDelegatedScope(scope.actor, SCOPE_LIGHTRAG_WRITE);
 
     if (!LIGHTRAG_INTERNAL_TOKEN) {
       return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
@@ -461,6 +783,7 @@ router.get('/openclaws/:id/lightrag-documents/:documentId/status', async (req, r
     const openclawId = req.params.id;
     const documentId = req.params.documentId;
     const scope = await deriveLightRagScope(req, openclawId);
+    ensureDelegatedScope(scope.actor, SCOPE_LIGHTRAG_READ);
 
     if (!LIGHTRAG_INTERNAL_TOKEN) {
       return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
@@ -488,6 +811,7 @@ router.get('/openclaws/:id/lightrag-documents/:documentId/chunks', async (req, r
     const openclawId = req.params.id;
     const documentId = req.params.documentId;
     const scope = await deriveLightRagScope(req, openclawId);
+    ensureDelegatedScope(scope.actor, SCOPE_LIGHTRAG_READ);
 
     if (!LIGHTRAG_INTERNAL_TOKEN) {
       return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
@@ -515,6 +839,7 @@ router.delete('/openclaws/:id/lightrag-documents/:documentId', async (req, res) 
     const openclawId = req.params.id;
     const documentId = req.params.documentId;
     const scope = await deriveLightRagScope(req, openclawId);
+    ensureDelegatedScope(scope.actor, SCOPE_LIGHTRAG_WRITE);
 
     if (!LIGHTRAG_INTERNAL_TOKEN) {
       return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
@@ -547,6 +872,7 @@ router.get('/openclaws/:id/lightrag-search', async (req, res) => {
     }
 
     const scope = await deriveLightRagScope(req, openclawId);
+    ensureDelegatedScope(scope.actor, SCOPE_LIGHTRAG_READ);
     if (!LIGHTRAG_INTERNAL_TOKEN) {
       return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
     }
@@ -642,6 +968,7 @@ router.get('/openclaws/:id/lightrag-label-search', async (req, res) => {
   try {
     const openclawId = req.params.id;
     const scope = await deriveLightRagScope(req, openclawId);
+    ensureDelegatedScope(scope.actor, SCOPE_LIGHTRAG_READ);
 
     if (!LIGHTRAG_INTERNAL_TOKEN) {
       return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
@@ -679,6 +1006,127 @@ router.get('/openclaws/:id/lightrag-label-search', async (req, res) => {
   } catch (err) {
     const statusCode = err.status || 500;
     res.status(statusCode).json({ error: err.message || 'Failed to search labels' });
+  }
+});
+
+// POST /auth/openclaws/:id/lightrag-query - run scoped retrieval search (same workspace only)
+router.post('/openclaws/:id/lightrag-query', async (req, res) => {
+  try {
+    const openclawId = req.params.id;
+    const scope = await deriveLightRagScope(req, openclawId);
+    ensureDelegatedScope(scope.actor, SCOPE_LIGHTRAG_READ);
+
+    if (!LIGHTRAG_INTERNAL_TOKEN) {
+      return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
+    }
+
+    const body = (req.body && typeof req.body === 'object') ? req.body : {};
+    const requestedWorkspaceId = body.workspace_id;
+    if (
+      requestedWorkspaceId != null &&
+      String(requestedWorkspaceId).trim() !== '' &&
+      String(requestedWorkspaceId) !== String(scope.workspaceId)
+    ) {
+      return res.status(403).json({ error: 'workspace mismatch' });
+    }
+
+    const query = (body.query || '').toString().trim();
+    if (!query) {
+      return res.status(400).json({ error: 'query is required' });
+    }
+
+    const upstreamPayload = {
+      ...body,
+      workspace_id: scope.workspaceId,
+      query,
+    };
+
+    const upstream = await fetch(`${LIGHTRAG_URL}/retrieval/search`, {
+      method: 'POST',
+      headers: {
+        ...lightRagHeaders(scope),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(upstreamPayload),
+    });
+
+    const { raw, json } = await readUpstreamJsonOrText(upstream);
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: raw || 'Failed to run LightRAG retrieval search' });
+    }
+
+    return res.json(json || {});
+  } catch (err) {
+    const statusCode = err.status || 500;
+    return res.status(statusCode).json({ error: err.message || 'Failed to run LightRAG retrieval search' });
+  }
+});
+
+// POST /auth/openclaws/:id/lightrag-compare - run scoped retrieval compare (same workspace only)
+router.post('/openclaws/:id/lightrag-compare', async (req, res) => {
+  try {
+    const openclawId = req.params.id;
+    const scope = await deriveLightRagScope(req, openclawId);
+    ensureDelegatedScope(scope.actor, SCOPE_LIGHTRAG_READ);
+
+    if (!LIGHTRAG_INTERNAL_TOKEN) {
+      return res.status(503).json({ error: 'LIGHTRAG_INTERNAL_TOKEN not configured' });
+    }
+
+    const body = (req.body && typeof req.body === 'object') ? req.body : {};
+    const query = (body.query || '').toString().trim();
+    const leftDocumentId = (body?.left?.document_id || '').toString().trim();
+    const rightDocumentId = (body?.right?.document_id || '').toString().trim();
+
+    if (!query) {
+      return res.status(400).json({ error: 'query is required' });
+    }
+    if (!leftDocumentId || !rightDocumentId) {
+      return res.status(400).json({ error: 'left.document_id and right.document_id are required' });
+    }
+
+    const leftWorkspace = body?.left?.workspace_id;
+    const rightWorkspace = body?.right?.workspace_id;
+    if (
+      (leftWorkspace != null && String(leftWorkspace).trim() !== '' && String(leftWorkspace) !== String(scope.workspaceId)) ||
+      (rightWorkspace != null && String(rightWorkspace).trim() !== '' && String(rightWorkspace) !== String(scope.workspaceId))
+    ) {
+      return res.status(403).json({ error: 'workspace mismatch' });
+    }
+
+    const upstreamPayload = {
+      ...body,
+      query,
+      left: {
+        ...(body.left && typeof body.left === 'object' ? body.left : {}),
+        workspace_id: scope.workspaceId,
+        document_id: leftDocumentId,
+      },
+      right: {
+        ...(body.right && typeof body.right === 'object' ? body.right : {}),
+        workspace_id: scope.workspaceId,
+        document_id: rightDocumentId,
+      },
+    };
+
+    const upstream = await fetch(`${LIGHTRAG_URL}/retrieval/compare`, {
+      method: 'POST',
+      headers: {
+        ...lightRagHeaders(scope),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(upstreamPayload),
+    });
+
+    const { raw, json } = await readUpstreamJsonOrText(upstream);
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: raw || 'Failed to run LightRAG retrieval compare' });
+    }
+
+    return res.json(json || {});
+  } catch (err) {
+    const statusCode = err.status || 500;
+    return res.status(statusCode).json({ error: err.message || 'Failed to run LightRAG retrieval compare' });
   }
 });
 

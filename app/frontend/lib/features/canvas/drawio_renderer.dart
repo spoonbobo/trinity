@@ -239,6 +239,15 @@ class DrawIORendererState extends ConsumerState<DrawIORenderer> {
     return drawIOTheme == DrawIOTheme.dark ? '1' : '0';
   }
 
+  String _defaultDiagramXml() {
+    final drawIOTheme = ref.read(drawIOThemeProvider);
+    final dark = drawIOTheme == DrawIOTheme.dark;
+    final bg = dark ? '#0A0A0A' : '#F5F5F5';
+    final grid = dark ? '#1F2937' : '#D1D5DB';
+    final page = dark ? '#0F172A' : '#FFFFFF';
+    return '<mxfile><diagram id="trinity-default" name="Page-1"><mxGraphModel dx="1426" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0" background="$bg" gridColor="$grid" pageBackgroundColor="$page"><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>';
+  }
+
   /// Reload iframe with current DrawIO theme (called when theme toggled)
   Future<void> reloadWithTheme() async {
     await _reloadWithTheme();
@@ -364,7 +373,7 @@ class DrawIORendererState extends ConsumerState<DrawIORenderer> {
     switch (evt) {
       case 'init':
         // Required: send load action after init to unblock the editor
-        final xml = _pendingLoadXml ?? '<mxfile><diagram></diagram></mxfile>';
+        final xml = _pendingLoadXml ?? _defaultDiagramXml();
         _pendingLoadXml = null;
         _lastKnownXml = xml;
         _initialized = true;

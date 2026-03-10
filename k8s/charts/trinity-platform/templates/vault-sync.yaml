@@ -130,12 +130,14 @@ data:
     SA_EMAIL=$(vget superadmin email)
     SA_PASS=$(vget superadmin password)
     ORCH_TOKEN=$(vget orchestrator service_token)
+    DELEGATION_JWT_SECRET=$(vget auth-service delegation_jwt_secret)
     GF_PASS=$(vget grafana password)
     LR_TOKEN=$(vget lightrag internal_token)
     LR_LLM=$(vget lightrag llm_api_key)
     LR_EMBED=$(vget lightrag embedding_api_key)
     ZEN_KEY=$(vget copilot zen_api_key)
     POE_KEY=$(vget openclaw poe_api_key)
+    BRAVE_KEY=$(vget openclaw brave_api_key)
     VAULT_TK="${VAULT_TOKEN}"
 
     echo "[vault-sync] Patching trinity-secrets via kubectl..."
@@ -151,11 +153,13 @@ data:
         \"GRAFANA_PASSWORD\": \"$GF_PASS\",
         \"VAULT_TOKEN\": \"$VAULT_TK\",
         \"ORCHESTRATOR_SERVICE_TOKEN\": \"$ORCH_TOKEN\",
+        \"DELEGATION_JWT_SECRET\": \"$DELEGATION_JWT_SECRET\",
         \"ZEN_API_KEY\": \"$ZEN_KEY\",
         \"LIGHTRAG_INTERNAL_TOKEN\": \"$LR_TOKEN\",
         \"LIGHTRAG_LLM_API_KEY\": \"$LR_LLM\",
         \"LIGHTRAG_EMBEDDING_API_KEY\": \"$LR_EMBED\",
-        \"POE_API_KEY\": \"$POE_KEY\"
+        \"POE_API_KEY\": \"$POE_KEY\",
+        \"BRAVE_API_KEY\": \"$BRAVE_KEY\"
       }
     }" && echo "[vault-sync] trinity-secrets patched" \
        || echo "[vault-sync] WARN: failed to patch trinity-secrets"

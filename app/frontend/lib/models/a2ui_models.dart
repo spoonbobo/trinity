@@ -131,13 +131,50 @@ class A2UIComponent {
     final id = json['id'] as String? ?? '';
     final weight = json['weight'] as num?;
     final componentRaw = json['component'];
-    if (componentRaw is! Map<String, dynamic> || componentRaw.isEmpty) {
-      return A2UIComponent(id: id, type: 'Unknown', props: {}, weight: weight);
+    if (componentRaw is Map<String, dynamic> && componentRaw.isNotEmpty) {
+      final type = componentRaw.keys.first;
+      final propsRaw = componentRaw[type];
+      final props = propsRaw is Map<String, dynamic> ? propsRaw : <String, dynamic>{};
+      return A2UIComponent(id: id, type: type, props: props, weight: weight);
     }
-    final type = componentRaw.keys.first;
-    final propsRaw = componentRaw[type];
-    final props = propsRaw is Map<String, dynamic> ? propsRaw : <String, dynamic>{};
-    return A2UIComponent(id: id, type: type, props: props, weight: weight);
+
+    // Backward compatibility: tolerate simplified non-v0.8 component shape
+    // Example: {"type":"button","id":"btn","text":"Click"}
+    final legacyType = json['type']?.toString().toLowerCase();
+    if (legacyType == 'button') {
+      final variant = json['variant']?.toString().toLowerCase();
+      final primary = json['primary'] == true || variant == 'primary';
+      final text = json['text']?.toString() ?? 'Button';
+      final actionRaw = json['action'];
+      final action = actionRaw is Map<String, dynamic>
+          ? actionRaw
+          : (actionRaw is String ? {'name': actionRaw} : null);
+
+      return A2UIComponent(
+        id: id,
+        type: 'Button',
+        props: {
+          'label': text,
+          'text': text,
+          'primary': primary,
+          if (variant != null && variant.isNotEmpty) 'variant': variant,
+          if (action != null) 'action': action,
+        },
+        weight: weight,
+      );
+    }
+
+    if (legacyType == 'text') {
+      final text = json['text']?.toString() ?? '';
+      return A2UIComponent(
+        id: id,
+        type: 'Text',
+        props: {'text': text},
+        weight: weight,
+      );
+    }
+
+    return A2UIComponent(id: id, type: 'Unknown', props: {}, weight: weight);
   }
 }
 
@@ -165,7 +202,7 @@ class BeginRendering {
 
   factory BeginRendering.fromJson(Map<String, dynamic> json) => BeginRendering(
         surfaceId: json['surfaceId'] as String? ?? 'main',
-        root: json['root'] as String? ?? '',
+        root: json['root'] as String? ?? json['rootId'] as String? ?? '',
         catalogId: json['catalogId'] as String?,
       );
 }

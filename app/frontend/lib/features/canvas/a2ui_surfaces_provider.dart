@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -52,17 +53,10 @@ class A2UISurfacesNotifier extends StateNotifier<A2UIState> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final client = _ref.read(gatewayClientProvider);
       _chatSub = client.events
-          .where((e) => e.event == 'a2ui' || e.event == 'canvas')
+          .where((e) =>
+              e.event == 'a2ui' || e.event == 'canvas' || e.event == 'agent')
           .listen(_handleEvent);
     });
-  }
-
-  void _handleEvent(WsEvent event) {
-    try {
-      _handleA2UIEvent(event);
-    } catch (e, st) {
-      debugPrint('[A2UI] error handling event: $e\n$st');
-    }
   }
 
   void _handleA2UIEvent(WsEvent event) {
@@ -101,10 +95,13 @@ class A2UISurfacesNotifier extends StateNotifier<A2UIState> {
             begin.surfaceId,
             () => A2UISurface(surfaceId: begin.surfaceId),
           );
-          surface.rootId = begin.root;
+          if (begin.root.isNotEmpty) {
+            surface.rootId = begin.root;
+          }
           if (begin.catalogId != null) {
             surface.catalogId = begin.catalogId;
           }
+          _ensureRenderableRoot(surface);
           needsRebuild = true;
         } catch (e) {
           debugPrint('[A2UI] bad beginRendering: $e');
@@ -148,6 +145,50 @@ class A2UISurfacesNotifier extends StateNotifier<A2UIState> {
     }
   }
 
+  void _handleAgentEvent(WsEvent event) {
+    final payload = event.payload;
+    final data = payload['data'];
+    if (data is! Map<String, dynamic>) return;
+
+    final stream = data['stream']?.toString();
+    if (stream != 'tool' && stream != 'tool_result') return;
+
+    final result = data['result']?.toString() ?? data['output']?.toString();
+    if (result == null) return;
+
+    final markerIndex = result.indexOf('__A2UI__');
+    if (markerIndex < 0) return;
+
+    final payloadText = result.substring(markerIndex);
+    final lines = payloadText
+        .split('\n')
+        .skip(1)
+        .where((line) => line.trim().isNotEmpty);
+
+    for (final line in lines) {
+      try {
+        final parsed = jsonDecode(line.trim());
+        if (parsed is Map<String, dynamic>) {
+          _handleA2UIEvent(WsEvent(event: 'a2ui', payload: parsed));
+        }
+      } catch (e) {
+        debugPrint('[A2UI] bad JSONL from agent tool result: $e');
+      }
+    }
+  }
+
+  void _handleEvent(WsEvent event) {
+    try {
+      if (event.event == 'agent') {
+        _handleAgentEvent(event);
+      } else {
+        _handleA2UIEvent(event);
+      }
+    } catch (e, st) {
+      debugPrint('[A2UI] error handling event: $e\n$st');
+    }
+  }
+
   void _ensureRenderableRoot(A2UISurface surface, {List<String>? preferredIds}) {
     final currentRoot = surface.rootId;
     if (currentRoot != null && surface.components.containsKey(currentRoot)) {
@@ -170,6 +211,39 @@ class A2UISurfacesNotifier extends StateNotifier<A2UIState> {
 
     if (surface.components.isNotEmpty) {
       surface.rootId = surface.components.keys.first;
+    }
+
+    // Backward compatibility: if payload sends multiple leaf components without
+    // an explicit layout root, synthesize a Column root so all components render.
+    final root = surface.rootId != null ? surface.components[surface.rootId] : null;
+    final isContainer = root != null && _isContainerType(root.type);
+    if (surface.components.length > 1 && !isContainer) {
+      const autoRootId = '__auto_root__';
+      final children = surface.components.keys.where((id) => id != autoRootId).toList();
+      surface.components[autoRootId] = A2UIComponent(
+        id: autoRootId,
+        type: 'Column',
+        props: {
+          'children': {
+            'explicitList': children,
+          },
+        },
+      );
+      surface.rootId = autoRootId;
+    }
+  }
+
+  bool _isContainerType(String type) {
+    switch (type) {
+      case 'Column':
+      case 'Row':
+      case 'Card':
+      case 'Tabs':
+      case 'List':
+      case 'Modal':
+        return true;
+      default:
+        return false;
     }
   }
 

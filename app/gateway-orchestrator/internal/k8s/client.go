@@ -78,6 +78,9 @@ func (c *Client) CreateOpenClawSecret(ctx context.Context, oc *db.OpenClaw, resN
 	if poeAPIKey := strings.TrimSpace(os.Getenv("POE_API_KEY")); poeAPIKey != "" {
 		stringData["POE_API_KEY"] = poeAPIKey
 	}
+	if braveAPIKey := strings.TrimSpace(os.Getenv("BRAVE_API_KEY")); braveAPIKey != "" {
+		stringData["BRAVE_API_KEY"] = braveAPIKey
+	}
 
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -252,6 +255,9 @@ func (c *Client) CreateOpenClawDeployment(ctx context.Context, oc *db.OpenClaw, 
 								},
 							},
 							Env: []corev1.EnvVar{
+								{Name: "OPENCLAW_ID", Value: oc.ID},
+								{Name: "TRINITY_AUTH_SERVICE_URL", Value: "http://auth-service:18791"},
+								{Name: "TRINITY_LIGHTRAG_URL", Value: "http://lightrag:18803"},
 								{
 									Name: "OPENCLAW_GATEWAY_TOKEN",
 									ValueFrom: &corev1.EnvVarSource{
@@ -268,11 +274,21 @@ func (c *Client) CreateOpenClawDeployment(ctx context.Context, oc *db.OpenClaw, 
 										SecretKeyRef: &corev1.SecretKeySelector{
 											LocalObjectReference: corev1.LocalObjectReference{Name: resName},
 											Key:                  "POE_API_KEY",
-											Optional:             boolPtr(true),
-										},
-									},
+									Optional:             boolPtr(true),
 								},
 							},
+						},
+						{
+							Name: "BRAVE_API_KEY",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{Name: resName},
+									Key:                  "BRAVE_API_KEY",
+									Optional:             boolPtr(true),
+								},
+							},
+						},
+					},
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "data", MountPath: "/home/node/.openclaw"},
 								{Name: "config", MountPath: "/etc/openclaw-config", ReadOnly: true},

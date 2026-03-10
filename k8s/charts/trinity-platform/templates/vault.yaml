@@ -217,6 +217,11 @@ spec:
                 secretKeyRef:
                   name: trinity-secrets
                   key: POE_API_KEY
+            - name: BRAVE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-secrets
+                  key: BRAVE_API_KEY
             - name: AUTHENTIK_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
