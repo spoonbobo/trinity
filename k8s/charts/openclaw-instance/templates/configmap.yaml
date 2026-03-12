@@ -39,7 +39,14 @@ data:
       },
       "browser": {
         "enabled": true,
+        "defaultProfile": "openclaw",
         "headless": true,
-        "noSandbox": true
+        "noSandbox": true,
+        "profiles": {
+          "openclaw": {
+            "cdpPort": 18800,
+            "color": "#FF4500"
+          }
+        }
       }
     }

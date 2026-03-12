@@ -23,6 +23,7 @@ const MAX_BYTES = 5 * 1024 * 1024; // 5 MB per file
 const MAX_SERVE_BYTES = 50 * 1024 * 1024; // 50 MB per file serve
 const UPLOAD_PATH = "/__openclaw__/upload";
 const MEDIA_PREFIX = "/__openclaw__/media/";
+const BROWSER_MEDIA_PREFIX = "/__openclaw__/browser-media/";
 
 // Windows reserved device names to reject in filenames
 const WINDOWS_RESERVED = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)/i;
@@ -146,6 +147,134 @@ function resolveWorkspace(api: any): string {
   return api.resolvePath
     ? api.resolvePath(workspace)
     : workspace.replace(/^~/, process.env.HOME ?? "/home/node");
+}
+
+async function serveFileFromRoots(
+  req: IncomingMessage,
+  res: ServerResponse,
+  api: any,
+  log: any,
+  prefix: string,
+  roots: string[],
+  options: { stripLeadingMediaPath?: boolean; logLabel?: string } = {}
+): Promise<boolean> {
+  if (req.method === "OPTIONS") {
+    res.statusCode = 204;
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    res.end();
+    return true;
+  }
+
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    res.statusCode = 405;
+    res.end("Method Not Allowed");
+    return true;
+  }
+
+  if (!validateAuth(req, api)) {
+    jsonResponse(res, 401, { ok: false, error: "Unauthorized" });
+    return true;
+  }
+
+  const url = new URL(req.url ?? "/", "http://localhost");
+  if (!url.pathname.startsWith(prefix)) {
+    return false;
+  }
+
+  const rawRelative = url.pathname.slice(prefix.length);
+  if (!rawRelative || rawRelative === "/") {
+    res.statusCode = 400;
+    res.end("Missing file path");
+    return true;
+  }
+
+  let relative = rawRelative.replace(/^\/+/, "");
+  if (options.stripLeadingMediaPath && relative.startsWith("media/")) {
+    relative = relative.substring("media/".length);
+  }
+  if (
+    !relative ||
+    relative.includes("\x00") ||
+    path.isAbsolute(relative) ||
+    relative.split("/").some((segment) => segment === "." || segment === "..")
+  ) {
+    res.statusCode = 400;
+    res.end("Invalid path");
+    return true;
+  }
+
+  let resolvedPath = "";
+  for (const root of roots) {
+    const candidate = path.resolve(root, relative);
+    const prefixWithSep = `${root}${path.sep}`;
+    if (candidate !== root && !candidate.startsWith(prefixWithSep)) {
+      continue;
+    }
+
+    try {
+      const lstat = await fs.lstat(candidate);
+      if (lstat.isSymbolicLink()) {
+        res.statusCode = 403;
+        res.end("Forbidden");
+        return true;
+      }
+      if (!lstat.isFile()) {
+        res.statusCode = 404;
+        res.end("Not found");
+        return true;
+      }
+      if (lstat.size > MAX_SERVE_BYTES) {
+        res.statusCode = 413;
+        res.end("File too large");
+        return true;
+      }
+
+      resolvedPath = candidate;
+      res.statusCode = 200;
+      res.setHeader("Content-Type", resolveMime(candidate));
+      res.setHeader("Content-Length", String(lstat.size));
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+
+      if (req.method === "HEAD") {
+        res.end();
+        return true;
+      }
+
+      const stream = createReadStream(candidate);
+      stream.on("error", (err) => {
+        log.error(
+          `file-upload: ${options.logLabel ?? "media"} stream error ${relative}: ${err.message}`
+        );
+        if (!res.headersSent) {
+          res.statusCode = 500;
+          res.end("Internal error");
+        } else {
+          res.end();
+        }
+      });
+      stream.pipe(res);
+      return true;
+    } catch (err: any) {
+      if (err.code === "ENOENT") {
+        continue;
+      }
+      log.error(
+        `file-upload: ${options.logLabel ?? "media"} serve failed ${relative}: ${err.message}`
+      );
+      res.statusCode = 500;
+      res.end("Internal error");
+      return true;
+    }
+  }
+
+  if (!resolvedPath) {
+    res.statusCode = 404;
+    res.end("Not found");
+  }
+  return true;
 }
 
 function extractBearerToken(req: IncomingMessage): string {
@@ -352,134 +481,35 @@ export default function register(api: any) {
     auth: "plugin",
     match: "prefix",
     handler: async (req: IncomingMessage, res: ServerResponse) => {
-      if (req.method === "OPTIONS") {
-        res.statusCode = 204;
-        res.setHeader("Access-Control-Allow-Origin", "*");
-        res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
-        res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
-        res.end();
-        return true;
-      }
-
-      if (req.method !== "GET" && req.method !== "HEAD") {
-        res.statusCode = 405;
-        res.end("Method Not Allowed");
-        return true;
-      }
-
-      if (!validateAuth(req, api)) {
-        jsonResponse(res, 401, { ok: false, error: "Unauthorized" });
-        return true;
-      }
-
-      const url = new URL(req.url ?? "/", "http://localhost");
-      if (!url.pathname.startsWith(MEDIA_PREFIX)) {
-        return false;
-      }
-
-      const rawRelative = url.pathname.slice(MEDIA_PREFIX.length);
-      if (!rawRelative || rawRelative === "/") {
-        res.statusCode = 400;
-        res.end("Missing file path");
-        return true;
-      }
-
-      let relative = rawRelative.replace(/^\/+/, "");
-      if (relative.startsWith("media/")) {
-        relative = relative.substring("media/".length);
-      }
-      if (
-        relative.includes("\x00") ||
-        path.isAbsolute(relative) ||
-        relative.split("/").some((s) => s === "." || s === "..")
-      ) {
-        res.statusCode = 400;
-        res.end("Invalid path");
-        return true;
-      }
-
       const resolvedWorkspace = resolveWorkspace(api);
       const mediaRoot = path.join(resolvedWorkspace, "media");
 
-      const candidateRoots = [mediaRoot, resolvedWorkspace];
-      let resolvedPath = "";
-      for (const root of candidateRoots) {
-        const candidate = path.resolve(root, relative);
-        const prefix = `${root}${path.sep}`;
-        if (candidate === root || candidate.startsWith(prefix)) {
-          resolvedPath = candidate;
-          break;
-        }
-      }
-      if (!resolvedPath) {
-        res.statusCode = 403;
-        res.end("Forbidden");
-        return true;
-      }
-
-      try {
-        let lstat;
-        try {
-          lstat = await fs.lstat(path.resolve(mediaRoot, relative));
-          resolvedPath = path.resolve(mediaRoot, relative);
-        } catch (err: any) {
-          if (err.code !== "ENOENT") throw err;
-          lstat = await fs.lstat(path.resolve(resolvedWorkspace, relative));
-          resolvedPath = path.resolve(resolvedWorkspace, relative);
-        }
-        if (lstat.isSymbolicLink()) {
-          res.statusCode = 403;
-          res.end("Forbidden");
-          return true;
-        }
-        if (!lstat.isFile()) {
-          res.statusCode = 404;
-          res.end("Not found");
-          return true;
-        }
-        if (lstat.size > MAX_SERVE_BYTES) {
-          res.statusCode = 413;
-          res.end("File too large");
-          return true;
-        }
-
-        const mime = resolveMime(resolvedPath);
-        res.statusCode = 200;
-        res.setHeader("Content-Type", mime);
-        res.setHeader("Content-Length", String(lstat.size));
-        res.setHeader("Cache-Control", "no-cache");
-        res.setHeader("Access-Control-Allow-Origin", "*");
-
-        if (req.method === "HEAD") {
-          res.end();
-          return true;
-        }
-
-        const stream = createReadStream(resolvedPath);
-        stream.on("error", (err) => {
-          log.error(`file-upload: media stream error ${relative}: ${err.message}`);
-          if (!res.headersSent) {
-            res.statusCode = 500;
-            res.end("Internal error");
-          } else {
-            res.end();
-          }
-        });
-        stream.pipe(res);
-        return true;
-      } catch (err: any) {
-        if (err.code === "ENOENT") {
-          res.statusCode = 404;
-          res.end("Not found");
-          return true;
-        }
-        log.error(`file-upload: media serve failed ${relative}: ${err.message}`);
-        res.statusCode = 500;
-        res.end("Internal error");
-        return true;
-      }
+      return serveFileFromRoots(req, res, api, log, MEDIA_PREFIX, [mediaRoot, resolvedWorkspace], {
+        stripLeadingMediaPath: true,
+        logLabel: "media",
+      });
     },
   });
 
-  log.info("file-upload: registered /__openclaw__/upload + /__openclaw__/media/ endpoints");
+  api.registerHttpRoute({
+    path: BROWSER_MEDIA_PREFIX,
+    auth: "plugin",
+    match: "prefix",
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      const browserMediaRoot = path.join(
+        process.env.HOME ?? "/home/node",
+        ".openclaw",
+        "media",
+        "browser"
+      );
+
+      return serveFileFromRoots(req, res, api, log, BROWSER_MEDIA_PREFIX, [browserMediaRoot], {
+        logLabel: "browser-media",
+      });
+    },
+  });
+
+  log.info(
+    "file-upload: registered /__openclaw__/upload + /__openclaw__/media/ + /__openclaw__/browser-media/ endpoints"
+  );
 }

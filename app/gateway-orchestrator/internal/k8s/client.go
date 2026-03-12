@@ -62,9 +62,9 @@ func ResourceName(name string) string {
 // resourceLabels returns the standard labels for an OpenClaw instance.
 func resourceLabels(openclawID, name string) map[string]string {
 	return map[string]string{
-		"trinity.ai/openclaw-id":  openclawID,
-		"trinity.ai/openclaw":     sanitizeName(name),
-		"app.kubernetes.io/name":  "openclaw-instance",
+		"trinity.ai/openclaw-id": openclawID,
+		"trinity.ai/openclaw":    sanitizeName(name),
+		"app.kubernetes.io/name": "openclaw-instance",
 	}
 }
 
@@ -88,7 +88,7 @@ func (c *Client) CreateOpenClawSecret(ctx context.Context, oc *db.OpenClaw, resN
 			Namespace: c.namespace,
 			Labels:    resourceLabels(oc.ID, oc.Name),
 		},
-		Type: corev1.SecretTypeOpaque,
+		Type:       corev1.SecretTypeOpaque,
 		StringData: stringData,
 	}
 	_, err := c.clientset.CoreV1().Secrets(c.namespace).Create(ctx, secret, metav1.CreateOptions{})
@@ -138,8 +138,15 @@ func (c *Client) CreateOpenClawConfigMap(ctx context.Context, oc *db.OpenClaw, r
   },
   "browser": {
     "enabled": true,
+    "defaultProfile": "openclaw",
     "headless": true,
-    "noSandbox": true
+    "noSandbox": true,
+    "profiles": {
+      "openclaw": {
+        "cdpPort": 18800,
+        "color": "#FF4500"
+      }
+    }
   }
 }`,
 		},
@@ -195,6 +202,12 @@ func (c *Client) CreateOpenClawService(ctx context.Context, oc *db.OpenClaw, res
 					TargetPort: intstr.FromInt32(18789),
 					Protocol:   corev1.ProtocolTCP,
 				},
+				{
+					Name:       "browser-ctl",
+					Port:       18793,
+					TargetPort: intstr.FromInt32(18793),
+					Protocol:   corev1.ProtocolTCP,
+				},
 			},
 		},
 	}
@@ -207,6 +220,7 @@ func (c *Client) CreateOpenClawService(ctx context.Context, oc *db.OpenClaw, res
 
 // CreateOpenClawDeployment creates the Deployment for an OpenClaw instance.
 func (c *Client) CreateOpenClawDeployment(ctx context.Context, oc *db.OpenClaw, resName, image, storageClass string) error {
+	_ = storageClass
 	replicas := int32(1)
 	labels := resourceLabels(oc.ID, oc.Name)
 
@@ -253,6 +267,11 @@ func (c *Client) CreateOpenClawDeployment(ctx context.Context, oc *db.OpenClaw, 
 									ContainerPort: 18789,
 									Protocol:      corev1.ProtocolTCP,
 								},
+								{
+									Name:          "browser-ctl",
+									ContainerPort: 18793,
+									Protocol:      corev1.ProtocolTCP,
+								},
 							},
 							Env: []corev1.EnvVar{
 								{Name: "OPENCLAW_ID", Value: oc.ID},
@@ -274,21 +293,21 @@ func (c *Client) CreateOpenClawDeployment(ctx context.Context, oc *db.OpenClaw, 
 										SecretKeyRef: &corev1.SecretKeySelector{
 											LocalObjectReference: corev1.LocalObjectReference{Name: resName},
 											Key:                  "POE_API_KEY",
-									Optional:             boolPtr(true),
+											Optional:             boolPtr(true),
+										},
+									},
+								},
+								{
+									Name: "BRAVE_API_KEY",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{Name: resName},
+											Key:                  "BRAVE_API_KEY",
+											Optional:             boolPtr(true),
+										},
+									},
 								},
 							},
-						},
-						{
-							Name: "BRAVE_API_KEY",
-							ValueFrom: &corev1.EnvVarSource{
-								SecretKeyRef: &corev1.SecretKeySelector{
-									LocalObjectReference: corev1.LocalObjectReference{Name: resName},
-									Key:                  "BRAVE_API_KEY",
-									Optional:             boolPtr(true),
-								},
-							},
-						},
-					},
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "data", MountPath: "/home/node/.openclaw"},
 								{Name: "config", MountPath: "/etc/openclaw-config", ReadOnly: true},
@@ -324,17 +343,26 @@ func (c *Client) CreateOpenClawDeployment(ctx context.Context, oc *db.OpenClaw, 
 						},
 					},
 					Volumes: []corev1.Volume{
-						{Name: "data", VolumeSource: corev1.VolumeSource{
-							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: resName},
-						}},
-						{Name: "config", VolumeSource: corev1.VolumeSource{
-							ConfigMap: &corev1.ConfigMapVolumeSource{
-								LocalObjectReference: corev1.LocalObjectReference{Name: resName},
+						{
+							Name: "data",
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: resName},
 							},
-						}},
-						{Name: "shm", VolumeSource: corev1.VolumeSource{
-							EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory},
-						}},
+						},
+						{
+							Name: "config",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{Name: resName},
+								},
+							},
+						},
+						{
+							Name: "shm",
+							VolumeSource: corev1.VolumeSource{
+								EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory},
+							},
+						},
 					},
 				},
 			},

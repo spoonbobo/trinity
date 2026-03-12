@@ -20,4 +20,7 @@ RUN flutter build web --release \
     --dart-define=AUTH_SERVICE_URL=$AUTH_SERVICE_URL \
     --dart-define=SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
 
+# Emit a deploy-specific build marker for client update checks.
+RUN sh -lc 'printf "{\"build\":\"%s\"}\n" "$(date -u +%Y%m%d%H%M%S)" > /app/build/web/trinity-version.json'
+
 CMD ["cp", "-r", "/app/build/web/.", "/output/"]

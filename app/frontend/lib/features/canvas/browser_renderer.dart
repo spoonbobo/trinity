@@ -20,8 +20,12 @@ class BrowserRenderer extends ConsumerStatefulWidget {
 class BrowserRendererState extends ConsumerState<BrowserRenderer> {
   final _urlController = TextEditingController();
   final _urlFocusNode = FocusNode();
+  final _typeController = TextEditingController();
+  final _keyController = TextEditingController(text: 'Enter');
   bool _urlEditing = false;
   bool _showSnapshot = false;
+  bool _showActions = false;
+  String? _selectedRef;
 
   @override
   void initState() {
@@ -37,6 +41,8 @@ class BrowserRendererState extends ConsumerState<BrowserRenderer> {
   void dispose() {
     _urlController.dispose();
     _urlFocusNode.dispose();
+    _typeController.dispose();
+    _keyController.dispose();
     super.dispose();
   }
 
@@ -80,28 +86,64 @@ class BrowserRendererState extends ConsumerState<BrowserRenderer> {
           ),
 
           // ── Tab strip ──────────────────────────────────────────
-          if (state.runState == BrowserRunState.running && state.tabs.isNotEmpty)
+          if (state.runState == BrowserRunState.running &&
+              state.tabs.isNotEmpty)
             _TabStrip(
               tabs: state.tabs,
               activeTabId: state.activeTabId,
               onTabTap: (id) => ref.read(browserProvider.notifier).focusTab(id),
-              onTabClose: (id) => ref.read(browserProvider.notifier).closeTab(id),
+              onTabClose: (id) =>
+                  ref.read(browserProvider.notifier).closeTab(id),
               onNewTab: () => ref.read(browserProvider.notifier).openTab(),
               tokens: t,
             ),
 
           // ── Main viewport ──────────────────────────────────────
-          Expanded(
-            child: _buildViewport(state, t),
-          ),
+          Expanded(child: _buildViewport(state, t)),
+
+          if (_showActions && state.runState == BrowserRunState.running)
+            _ActionPanel(
+              state: state,
+              selectedRef: _selectedRef,
+              typeController: _typeController,
+              keyController: _keyController,
+              onSelectRef: (value) => setState(() => _selectedRef = value),
+              onRefreshRefs: () =>
+                  ref.read(browserProvider.notifier).refreshSnapshot(),
+              onClick: () {
+                if (_selectedRef == null || _selectedRef!.isEmpty) return;
+                ref.read(browserProvider.notifier).clickRef(_selectedRef!);
+              },
+              onType: () {
+                if (_selectedRef == null || _selectedRef!.isEmpty) return;
+                final text = _typeController.text.trim();
+                if (text.isEmpty) return;
+                ref
+                    .read(browserProvider.notifier)
+                    .typeText(_selectedRef!, text);
+              },
+              onPress: () {
+                final key = _keyController.text.trim();
+                if (key.isEmpty) return;
+                ref.read(browserProvider.notifier).pressKey(key);
+              },
+              tokens: t,
+            ),
 
           // ── Status bar ─────────────────────────────────────────
           _StatusBar(
             state: state,
             showSnapshot: _showSnapshot,
+            showActions: _showActions,
             onToggleSnapshot: () => setState(() {
               _showSnapshot = !_showSnapshot;
               if (_showSnapshot) {
+                ref.read(browserProvider.notifier).refreshSnapshot();
+              }
+            }),
+            onToggleActions: () => setState(() {
+              _showActions = !_showActions;
+              if (_showActions) {
                 ref.read(browserProvider.notifier).refreshSnapshot();
               }
             }),
@@ -132,15 +174,18 @@ class BrowserRendererState extends ConsumerState<BrowserRenderer> {
           mainAxisSize: MainAxisSize.min,
           children: [
             SizedBox(
-              width: 20, height: 20,
+              width: 20,
+              height: 20,
               child: CircularProgressIndicator(
                 strokeWidth: 1.5,
                 color: t.accentPrimary,
               ),
             ),
             const SizedBox(height: 12),
-            Text('starting browser...',
-                style: TextStyle(fontSize: 11, color: t.fgMuted)),
+            Text(
+              'starting browser...',
+              style: TextStyle(fontSize: 11, color: t.fgMuted),
+            ),
           ],
         ),
       );
@@ -163,21 +208,28 @@ class BrowserRendererState extends ConsumerState<BrowserRenderer> {
           children: [
             Icon(Icons.web, size: 24, color: t.fgMuted),
             const SizedBox(height: 8),
-            Text('waiting for screenshot...',
-                style: TextStyle(fontSize: 11, color: t.fgMuted)),
+            Text(
+              'waiting for screenshot...',
+              style: TextStyle(fontSize: 11, color: t.fgMuted),
+            ),
             const SizedBox(height: 12),
             GestureDetector(
               onTap: () => ref.read(browserProvider.notifier).manualRefresh(),
               child: MouseRegion(
                 cursor: SystemMouseCursors.click,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     borderRadius: kShellBorderRadiusSm,
                     border: Border.all(color: t.border, width: 0.5),
                   ),
-                  child: Text('refresh',
-                      style: TextStyle(fontSize: 10, color: t.accentPrimary)),
+                  child: Text(
+                    'refresh',
+                    style: TextStyle(fontSize: 10, color: t.accentPrimary),
+                  ),
                 ),
               ),
             ),
@@ -186,57 +238,102 @@ class BrowserRendererState extends ConsumerState<BrowserRenderer> {
       );
     }
 
-    return Stack(
-      children: [
-        // Screenshot image
-        Positioned.fill(
-          child: InteractiveViewer(
-            minScale: 0.5,
-            maxScale: 3.0,
-            child: Image.memory(
-              state.screenshotBytes!,
-              fit: BoxFit.contain,
-              gaplessPlayback: true, // Prevent flicker between frames
-              filterQuality: FilterQuality.medium,
-            ),
-          ),
-        ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final dpr = MediaQuery.of(context).devicePixelRatio;
+        final width = (constraints.maxWidth * dpr).round();
+        final height = (constraints.maxHeight * dpr).round();
 
-        // Loading overlay during refresh
-        if (state.isLoading)
-          Positioned(
-            top: 4, right: 4,
-            child: SizedBox(
-              width: 14, height: 14,
-              child: CircularProgressIndicator(
-                strokeWidth: 1.5,
-                color: t.accentPrimary.withOpacity(0.5),
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          ref.read(browserProvider.notifier).setViewportSize(width, height);
+        });
+
+        return Stack(
+          children: [
+            // Screenshot image
+            Positioned.fill(
+              child: InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 3.0,
+                child: Image.memory(
+                  state.screenshotBytes!,
+                  fit: BoxFit.contain,
+                  gaplessPlayback: true,
+                  filterQuality: FilterQuality.high,
+                ),
               ),
             ),
-          ),
 
-        // Snapshot text overlay (toggled via status bar)
-        if (_showSnapshot && state.snapshotText != null && state.snapshotText!.isNotEmpty)
-          Positioned.fill(
-            child: Container(
-              color: t.surfaceBase.withOpacity(0.85),
-              padding: const EdgeInsets.all(8),
-              child: SingleChildScrollView(
-                child: SelectionArea(
+            // Loading overlay during refresh
+            if (state.isLoading)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: t.accentPrimary.withOpacity(0.5),
+                  ),
+                ),
+              ),
+
+            if (state.screenshotError != null &&
+                state.screenshotError!.isNotEmpty)
+              Positioned(
+                left: 8,
+                right: 8,
+                top: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: t.statusError.withOpacity(0.12),
+                    border: Border.all(
+                      color: t.statusError.withOpacity(0.35),
+                      width: 0.5,
+                    ),
+                    borderRadius: kShellBorderRadiusSm,
+                  ),
                   child: Text(
-                    state.snapshotText!,
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: t.fgSecondary,
-                      fontFamily: 'monospace',
-                      height: 1.4,
+                    state.screenshotError!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10, color: t.statusError),
+                  ),
+                ),
+              ),
+
+            // Snapshot text overlay (toggled via status bar)
+            if (_showSnapshot &&
+                state.snapshotText != null &&
+                state.snapshotText!.isNotEmpty)
+              Positioned.fill(
+                child: Container(
+                  color: t.surfaceBase.withOpacity(0.85),
+                  padding: const EdgeInsets.all(8),
+                  child: SingleChildScrollView(
+                    child: SelectionArea(
+                      child: Text(
+                        state.snapshotText!,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: t.fgSecondary,
+                          fontFamily: 'monospace',
+                          height: 1.4,
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-          ),
-      ],
+          ],
+        );
+      },
     );
   }
 }
@@ -332,10 +429,7 @@ class _BrowserToolbar extends StatelessWidget {
                         controller: urlController,
                         focusNode: urlFocusNode,
                         autofocus: true,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: tokens.fgPrimary,
-                        ),
+                        style: TextStyle(fontSize: 11, color: tokens.fgPrimary),
                         decoration: const InputDecoration(
                           border: InputBorder.none,
                           isDense: true,
@@ -349,8 +443,11 @@ class _BrowserToolbar extends StatelessWidget {
                           if (url.startsWith('https://'))
                             Padding(
                               padding: const EdgeInsets.only(right: 4),
-                              child: Icon(Icons.lock,
-                                  size: 10, color: tokens.accentPrimary),
+                              child: Icon(
+                                Icons.lock,
+                                size: 10,
+                                color: tokens.accentPrimary,
+                              ),
                             ),
                           Expanded(
                             child: Text(
@@ -376,9 +473,7 @@ class _BrowserToolbar extends StatelessWidget {
   /// Strip protocol for display.
   static String _displayUrl(String url) {
     if (url.isEmpty) return '';
-    return url
-        .replaceFirst('https://', '')
-        .replaceFirst('http://', '');
+    return url.replaceFirst('https://', '').replaceFirst('http://', '');
   }
 }
 
@@ -414,7 +509,8 @@ class _NavButtonState extends State<_NavButton> {
           onEnter: (_) => setState(() => _hovering = true),
           onExit: (_) => setState(() => _hovering = false),
           child: Container(
-            width: 24, height: 24,
+            width: 24,
+            height: 24,
             decoration: BoxDecoration(
               borderRadius: kShellBorderRadiusSm,
               color: _hovering
@@ -488,7 +584,8 @@ class _TabStrip extends StatelessWidget {
             child: MouseRegion(
               cursor: SystemMouseCursors.click,
               child: Container(
-                width: 24, height: 24,
+                width: 24,
+                height: 24,
                 margin: const EdgeInsets.only(right: 4),
                 child: Icon(Icons.add, size: 14, color: tokens.fgMuted),
               ),
@@ -539,8 +636,8 @@ class _TabChipState extends State<_TabChip> {
             color: widget.isActive
                 ? widget.tokens.surfaceBase
                 : _hovering
-                    ? widget.tokens.surfaceElevated.withOpacity(0.3)
-                    : Colors.transparent,
+                ? widget.tokens.surfaceElevated.withOpacity(0.3)
+                : Colors.transparent,
             border: widget.isActive
                 ? Border.all(color: widget.tokens.border, width: 0.5)
                 : null,
@@ -565,7 +662,11 @@ class _TabChipState extends State<_TabChip> {
                 const SizedBox(width: 4),
                 GestureDetector(
                   onTap: widget.onClose,
-                  child: Icon(Icons.close, size: 10, color: widget.tokens.fgMuted),
+                  child: Icon(
+                    Icons.close,
+                    size: 10,
+                    color: widget.tokens.fgMuted,
+                  ),
                 ),
               ],
             ],
@@ -585,11 +686,7 @@ class _StartScreen extends StatelessWidget {
   final String? error;
   final ShellTokens tokens;
 
-  const _StartScreen({
-    required this.onStart,
-    this.error,
-    required this.tokens,
-  });
+  const _StartScreen({required this.onStart, this.error, required this.tokens});
 
   @override
   Widget build(BuildContext context) {
@@ -598,7 +695,8 @@ class _StartScreen extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 48, height: 48,
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(
               borderRadius: kShellBorderRadius,
               border: Border.all(color: tokens.border, width: 0.5),
@@ -606,11 +704,15 @@ class _StartScreen extends StatelessWidget {
             child: Icon(Icons.language, size: 24, color: tokens.fgMuted),
           ),
           const SizedBox(height: 16),
-          Text('openclaw managed browser',
-              style: TextStyle(fontSize: 12, color: tokens.fgSecondary)),
+          Text(
+            'openclaw managed browser',
+            style: TextStyle(fontSize: 12, color: tokens.fgSecondary),
+          ),
           const SizedBox(height: 4),
-          Text('isolated chromium instance for agent + human collaboration',
-              style: TextStyle(fontSize: 10, color: tokens.fgMuted)),
+          Text(
+            'isolated chromium instance for agent + human collaboration',
+            style: TextStyle(fontSize: 10, color: tokens.fgMuted),
+          ),
           if (error != null) ...[
             const SizedBox(height: 8),
             Container(
@@ -619,7 +721,10 @@ class _StartScreen extends StatelessWidget {
               decoration: BoxDecoration(
                 borderRadius: kShellBorderRadiusSm,
                 color: tokens.statusError.withOpacity(0.1),
-                border: Border.all(color: tokens.statusError.withOpacity(0.3), width: 0.5),
+                border: Border.all(
+                  color: tokens.statusError.withOpacity(0.3),
+                  width: 0.5,
+                ),
               ),
               child: Text(
                 error!,
@@ -635,18 +740,26 @@ class _StartScreen extends StatelessWidget {
             child: MouseRegion(
               cursor: SystemMouseCursors.click,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   borderRadius: kShellBorderRadiusSm,
                   color: tokens.accentPrimary.withOpacity(0.15),
-                  border: Border.all(color: tokens.accentPrimary.withOpacity(0.3), width: 0.5),
+                  border: Border.all(
+                    color: tokens.accentPrimary.withOpacity(0.3),
+                    width: 0.5,
+                  ),
                 ),
-                child: Text('start browser',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: tokens.accentPrimary,
-                      fontWeight: FontWeight.w600,
-                    )),
+                child: Text(
+                  'start browser',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: tokens.accentPrimary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
             ),
           ),
@@ -685,7 +798,10 @@ class _ErrorScreen extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: kShellBorderRadiusSm,
               color: tokens.statusError.withOpacity(0.1),
-              border: Border.all(color: tokens.statusError.withOpacity(0.3), width: 0.5),
+              border: Border.all(
+                color: tokens.statusError.withOpacity(0.3),
+                width: 0.5,
+              ),
             ),
             child: Text(
               error,
@@ -701,13 +817,18 @@ class _ErrorScreen extends StatelessWidget {
             child: MouseRegion(
               cursor: SystemMouseCursors.click,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   borderRadius: kShellBorderRadiusSm,
                   border: Border.all(color: tokens.border, width: 0.5),
                 ),
-                child: Text('retry',
-                    style: TextStyle(fontSize: 10, color: tokens.accentPrimary)),
+                child: Text(
+                  'retry',
+                  style: TextStyle(fontSize: 10, color: tokens.accentPrimary),
+                ),
               ),
             ),
           ),
@@ -724,14 +845,18 @@ class _ErrorScreen extends StatelessWidget {
 class _StatusBar extends StatelessWidget {
   final BrowserState state;
   final bool showSnapshot;
+  final bool showActions;
   final VoidCallback onToggleSnapshot;
+  final VoidCallback onToggleActions;
   final VoidCallback onToggleAutoRefresh;
   final ShellTokens tokens;
 
   const _StatusBar({
     required this.state,
     required this.showSnapshot,
+    required this.showActions,
     required this.onToggleSnapshot,
+    required this.onToggleActions,
     required this.onToggleAutoRefresh,
     required this.tokens,
   });
@@ -761,31 +886,34 @@ class _StatusBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Status dot + label
-          Container(
-            width: 6, height: 6,
-            decoration: BoxDecoration(
-              color: statusColor,
-              shape: BoxShape.circle,
+          Expanded(
+            child: Row(
+              children: [
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: statusColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  statusLabel,
+                  style: TextStyle(fontSize: 9, color: tokens.fgMuted),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'profile: ${state.profile}${state.tabs.isNotEmpty ? ' | ${state.tabs.length} tab${state.tabs.length == 1 ? '' : 's'}' : ''}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 9, color: tokens.fgMuted),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 4),
-          Text(statusLabel,
-              style: TextStyle(fontSize: 9, color: tokens.fgMuted)),
-          const SizedBox(width: 8),
-
-          // Profile name
-          Text('profile: ${state.profile}',
-              style: TextStyle(fontSize: 9, color: tokens.fgMuted)),
-
-          // Tab count
-          if (state.tabs.isNotEmpty) ...[
-            const SizedBox(width: 8),
-            Text('${state.tabs.length} tab${state.tabs.length == 1 ? '' : 's'}',
-                style: TextStyle(fontSize: 9, color: tokens.fgMuted)),
-          ],
-
-          const Spacer(),
 
           // Snapshot toggle
           if (state.runState == BrowserRunState.running)
@@ -807,6 +935,28 @@ class _StatusBar extends StatelessWidget {
                 ),
               ),
             ),
+
+          if (state.runState == BrowserRunState.running) ...[
+            const SizedBox(width: 10),
+            GestureDetector(
+              onTap: onToggleActions,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Text(
+                    showActions ? 'hide actions' : 'actions',
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: showActions
+                          ? tokens.accentPrimary
+                          : tokens.fgMuted,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
 
           // Auto-refresh toggle
           if (state.runState == BrowserRunState.running)
@@ -839,6 +989,194 @@ class _StatusBar extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _ActionPanel extends StatelessWidget {
+  final BrowserState state;
+  final String? selectedRef;
+  final TextEditingController typeController;
+  final TextEditingController keyController;
+  final ValueChanged<String?> onSelectRef;
+  final VoidCallback onRefreshRefs;
+  final VoidCallback onClick;
+  final VoidCallback onType;
+  final VoidCallback onPress;
+  final ShellTokens tokens;
+
+  const _ActionPanel({
+    required this.state,
+    required this.selectedRef,
+    required this.typeController,
+    required this.keyController,
+    required this.onSelectRef,
+    required this.onRefreshRefs,
+    required this.onClick,
+    required this.onType,
+    required this.onPress,
+    required this.tokens,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 88,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: tokens.surfaceCard,
+        border: Border(top: BorderSide(color: tokens.border, width: 0.5)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Text(
+                'interactive actions',
+                style: TextStyle(fontSize: 10, color: tokens.fgSecondary),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${state.snapshotRefs.length} refs',
+                style: TextStyle(fontSize: 9, color: tokens.fgMuted),
+              ),
+              const Spacer(),
+              _ActionTextButton(
+                label: 'sync refs',
+                onTap: onRefreshRefs,
+                tokens: tokens,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  Container(
+                    width: 230,
+                    height: 28,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      borderRadius: kShellBorderRadiusSm,
+                      border: Border.all(color: tokens.border, width: 0.5),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: selectedRef,
+                        isDense: true,
+                        isExpanded: true,
+                        iconSize: 14,
+                        hint: Text(
+                          state.snapshotRefs.isEmpty ? 'no refs yet (click sync refs)' : 'select ref',
+                          style: TextStyle(fontSize: 10, color: tokens.fgMuted),
+                        ),
+                        items: state.snapshotRefs.map((r) {
+                          final label = '${r.ref} ${r.role}${r.name.isNotEmpty ? ': ${r.name}' : ''}';
+                          return DropdownMenuItem<String>(
+                            value: r.ref,
+                            child: Text(
+                              label,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 10, color: tokens.fgSecondary),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: onSelectRef,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  _ActionTextButton(label: 'click', onTap: onClick, tokens: tokens),
+                  const SizedBox(width: 6),
+                  Container(
+                    width: 260,
+                    height: 28,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      borderRadius: kShellBorderRadiusSm,
+                      border: Border.all(color: tokens.border, width: 0.5),
+                    ),
+                    child: TextField(
+                      controller: typeController,
+                      style: TextStyle(fontSize: 10, color: tokens.fgPrimary),
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.zero,
+                        hintText: 'text to type',
+                      ),
+                      onSubmitted: (_) => onType(),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  _ActionTextButton(label: 'type', onTap: onType, tokens: tokens),
+                  const SizedBox(width: 6),
+                  SizedBox(
+                    width: 80,
+                    child: Container(
+                      height: 28,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      decoration: BoxDecoration(
+                        borderRadius: kShellBorderRadiusSm,
+                        border: Border.all(color: tokens.border, width: 0.5),
+                      ),
+                      child: TextField(
+                        controller: keyController,
+                        style: TextStyle(fontSize: 10, color: tokens.fgPrimary),
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        onSubmitted: (_) => onPress(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  _ActionTextButton(label: 'press', onTap: onPress, tokens: tokens),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionTextButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  final ShellTokens tokens;
+
+  const _ActionTextButton({
+    required this.label,
+    required this.onTap,
+    required this.tokens,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Container(
+          height: 28,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: kShellBorderRadiusSm,
+            border: Border.all(color: tokens.border, width: 0.5),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(fontSize: 10, color: tokens.accentPrimary),
+          ),
+        ),
       ),
     );
   }
