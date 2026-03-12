@@ -1,13 +1,12 @@
 import 'dart:async';
-import 'dart:html' as html;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/theme.dart';
 import 'core/i18n.dart';
-import 'core/providers.dart';
 import 'core/dialog_service.dart';
+import 'core/app_update_gate.dart';
 import 'features/shell/shell_page.dart';
 import 'features/auth/auth_guard.dart';
 
@@ -89,7 +88,7 @@ class TrinityApp extends ConsumerWidget {
       themeMode: mode,
       theme: buildTheme(lightTokens, Brightness.light, fontFamily),
       darkTheme: buildTheme(darkTokens, Brightness.dark, fontFamily),
-      home: const AuthGuard(child: ShellPage()),
+      home: const AppUpdateGate(child: AuthGuard(child: ShellPage())),
     );
   }
 }

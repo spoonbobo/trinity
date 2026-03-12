@@ -39,6 +39,14 @@ class _CanvasPanelState extends ConsumerState<CanvasPanel> {
     );
   }
 
+  void _showBrowserRefActionsDialog() {
+    DialogService.instance.showUnique(
+      context: context,
+      id: 'browser-ref-actions',
+      builder: (_) => const _BrowserRefActionsDialog(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final mode = ref.watch(canvasModeProvider);
@@ -187,6 +195,52 @@ class _CanvasPanelState extends ConsumerState<CanvasPanel> {
                         icon: Icons.refresh,
                         tooltip: 'refresh screenshot',
                         onTap: () => browserNotifier.manualRefresh(),
+                        tokens: t,
+                      ),
+                      const SizedBox(width: 2),
+                      _SmallButton(
+                        icon: Icons.sync,
+                        tooltip: 'sync refs',
+                        onTap: () async {
+                          final refCount = await browserNotifier.refreshSnapshot();
+                          if (!mounted) return;
+                          if (refCount >= 0) {
+                            ToastService.showInfo(
+                              context,
+                              'synced $refCount refs (use actions to click/type)',
+                            );
+                          } else {
+                            ToastService.showError(
+                              context,
+                              'failed to sync refs',
+                            );
+                          }
+                        },
+                        tokens: t,
+                      ),
+                      const SizedBox(width: 2),
+                      _SmallButton(
+                        icon: Icons.build,
+                        tooltip: 'ref actions',
+                        onTap: _showBrowserRefActionsDialog,
+                        tokens: t,
+                      ),
+                      const SizedBox(width: 2),
+                      _SmallButton(
+                        icon: browserState.autoRefresh
+                            ? Icons.pause
+                            : Icons.play_arrow,
+                        tooltip: browserState.autoRefresh
+                            ? 'auto-refresh: live (click to pause)'
+                            : 'auto-refresh: paused (click for live)',
+                        onTap: () {
+                          browserNotifier.toggleAutoRefresh();
+                          final live = !browserState.autoRefresh;
+                          ToastService.showInfo(
+                            context,
+                            live ? 'auto-refresh: live' : 'auto-refresh: paused',
+                          );
+                        },
                         tokens: t,
                       ),
                       const SizedBox(width: 2),
@@ -645,7 +699,7 @@ class _ModeToggle extends StatelessWidget {
             label: 'browser',
             isSelected: currentMode == CanvasMode.browser,
             onTap: () => onModeChanged(CanvasMode.browser),
-            badge: 'n/a',
+            badge: 'beta',
             tokens: tokens,
           ),
           _divider(),
@@ -815,6 +869,281 @@ class _SmallTextButton extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BrowserRefActionsDialog extends ConsumerStatefulWidget {
+  const _BrowserRefActionsDialog();
+
+  @override
+  ConsumerState<_BrowserRefActionsDialog> createState() =>
+      _BrowserRefActionsDialogState();
+}
+
+class _BrowserRefActionsDialogState
+    extends ConsumerState<_BrowserRefActionsDialog> {
+  String? _selectedRef;
+  final TextEditingController _typeController = TextEditingController();
+  final TextEditingController _keyController = TextEditingController(
+    text: 'Enter',
+  );
+
+  SnapshotRef? _pickBestRef(List<SnapshotRef> refs) {
+    if (refs.isEmpty) return null;
+
+    const rolePriority = <String>{
+      'button',
+      'link',
+      'textbox',
+      'searchbox',
+      'combobox',
+      'menuitem',
+      'tab',
+    };
+    const nameHints = <String>[
+      'search',
+      'sign in',
+      'login',
+      'next',
+      'continue',
+      'submit',
+    ];
+
+    for (final ref in refs) {
+      if (rolePriority.contains(ref.role.toLowerCase())) {
+        return ref;
+      }
+    }
+    for (final ref in refs) {
+      final lower = ref.name.toLowerCase();
+      if (nameHints.any(lower.contains)) return ref;
+    }
+    return refs.first;
+  }
+
+  @override
+  void dispose() {
+    _typeController.dispose();
+    _keyController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = ShellTokens.of(context);
+    final browserState = ref.watch(browserProvider);
+    final browserNotifier = ref.read(browserProvider.notifier);
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: kShellBorderRadius),
+      backgroundColor: t.surfaceBase,
+      child: Container(
+        width: 520,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          borderRadius: kShellBorderRadius,
+          border: Border.all(color: t.border, width: 0.5),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'browser ref actions',
+                  style: TextStyle(fontSize: 12, color: t.fgPrimary),
+                ),
+                const Spacer(),
+                Text(
+                  '${browserState.snapshotRefs.length} refs',
+                  style: TextStyle(fontSize: 10, color: t.fgMuted),
+                ),
+                const SizedBox(width: 8),
+                _SmallTextButton(
+                  label: 'sync refs',
+                  tooltip: 'refresh interactive refs',
+                  onTap: () async {
+                    final count = await browserNotifier.refreshSnapshot();
+                    if (!mounted) return;
+                    if (count >= 0) {
+                      final refs = ref.read(browserProvider).snapshotRefs;
+                      final picked = _pickBestRef(refs);
+                      setState(() => _selectedRef = picked?.ref);
+                      ToastService.showInfo(
+                        context,
+                        picked != null
+                            ? 'synced $count refs, selected ${picked.ref}'
+                            : 'synced $count refs',
+                      );
+                    } else {
+                      ToastService.showError(context, 'failed to sync refs');
+                    }
+                  },
+                  tokens: t,
+                ),
+                const SizedBox(width: 6),
+                _SmallTextButton(
+                  label: 'auto click',
+                  tooltip: 'sync and click best ref',
+                  onTap: () async {
+                    var refs = ref.read(browserProvider).snapshotRefs;
+                    if (refs.isEmpty) {
+                      final count = await browserNotifier.refreshSnapshot();
+                      if (!mounted) return;
+                      if (count < 0) {
+                        ToastService.showError(context, 'failed to sync refs');
+                        return;
+                      }
+                      refs = ref.read(browserProvider).snapshotRefs;
+                    }
+
+                    final picked = _pickBestRef(refs);
+                    if (picked == null) {
+                      ToastService.showError(context, 'no refs available to click');
+                      return;
+                    }
+                    setState(() => _selectedRef = picked.ref);
+                    browserNotifier.clickRef(picked.ref);
+                    ToastService.showInfo(context, 'clicked ${picked.ref}');
+                  },
+                  tokens: t,
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Container(
+              height: 34,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                borderRadius: kShellBorderRadiusSm,
+                border: Border.all(color: t.border, width: 0.5),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _selectedRef,
+                  isExpanded: true,
+                  hint: Text(
+                    browserState.snapshotRefs.isEmpty
+                        ? 'no refs yet (click sync refs)'
+                        : 'select ref',
+                    style: TextStyle(fontSize: 11, color: t.fgMuted),
+                  ),
+                  items: browserState.snapshotRefs.map((r) {
+                    final label =
+                        '${r.ref} ${r.role}${r.name.isNotEmpty ? ': ${r.name}' : ''}';
+                    return DropdownMenuItem<String>(
+                      value: r.ref,
+                      child: Text(
+                        label,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11, color: t.fgSecondary),
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (value) => setState(() => _selectedRef = value),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                _SmallTextButton(
+                  label: 'click ref',
+                  tooltip: 'click selected ref',
+                  onTap: () {
+                    if (_selectedRef == null || _selectedRef!.isEmpty) {
+                      ToastService.showError(context, 'select a ref first');
+                      return;
+                    }
+                    browserNotifier.clickRef(_selectedRef!);
+                  },
+                  tokens: t,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Container(
+                    height: 30,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      borderRadius: kShellBorderRadiusSm,
+                      border: Border.all(color: t.border, width: 0.5),
+                    ),
+                    child: TextField(
+                      controller: _typeController,
+                      style: TextStyle(fontSize: 11, color: t.fgPrimary),
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.zero,
+                        hintText: 'text to type',
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                _SmallTextButton(
+                  label: 'type',
+                  tooltip: 'type into selected ref',
+                  onTap: () {
+                    if (_selectedRef == null || _selectedRef!.isEmpty) {
+                      ToastService.showError(context, 'select a ref first');
+                      return;
+                    }
+                    final text = _typeController.text.trim();
+                    if (text.isEmpty) {
+                      ToastService.showError(context, 'enter text first');
+                      return;
+                    }
+                    browserNotifier.typeText(_selectedRef!, text);
+                  },
+                  tokens: t,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                SizedBox(
+                  width: 120,
+                  child: Container(
+                    height: 30,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      borderRadius: kShellBorderRadiusSm,
+                      border: Border.all(color: t.border, width: 0.5),
+                    ),
+                    child: TextField(
+                      controller: _keyController,
+                      style: TextStyle(fontSize: 11, color: t.fgPrimary),
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                _SmallTextButton(
+                  label: 'press key',
+                  tooltip: 'press keyboard key',
+                  onTap: () {
+                    final key = _keyController.text.trim();
+                    if (key.isEmpty) {
+                      ToastService.showError(context, 'enter key first');
+                      return;
+                    }
+                    browserNotifier.pressKey(key);
+                  },
+                  tokens: t,
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );

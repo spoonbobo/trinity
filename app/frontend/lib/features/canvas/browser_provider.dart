@@ -13,21 +13,22 @@ class BrowserTab {
   final String targetId;
   final String title;
   final String url;
+  final String type;
   final bool active;
 
   const BrowserTab({
     required this.targetId,
     required this.title,
     required this.url,
+    this.type = 'page',
     this.active = false,
   });
 
   factory BrowserTab.fromJson(Map<String, dynamic> json) => BrowserTab(
-        targetId: json['targetId'] as String? ??
-            json['id'] as String? ??
-            '',
+        targetId: json['targetId'] as String? ?? json['id'] as String? ?? '',
         title: json['title'] as String? ?? 'Untitled',
         url: json['url'] as String? ?? '',
+        type: json['type'] as String? ?? 'page',
         active: json['active'] as bool? ?? false,
       );
 }
@@ -75,6 +76,7 @@ class BrowserState {
   final int viewportHeight;
   final bool autoRefresh;
   final String? error;
+  final String? screenshotError;
   final bool isLoading; // any operation in progress
   final String profile;
 
@@ -91,6 +93,7 @@ class BrowserState {
     this.viewportHeight = 720,
     this.autoRefresh = true,
     this.error,
+    this.screenshotError,
     this.isLoading = false,
     this.profile = 'openclaw',
   });
@@ -108,6 +111,7 @@ class BrowserState {
     int? viewportHeight,
     bool? autoRefresh,
     String? error,
+    String? screenshotError,
     bool? isLoading,
     String? profile,
   }) =>
@@ -124,6 +128,7 @@ class BrowserState {
         viewportHeight: viewportHeight ?? this.viewportHeight,
         autoRefresh: autoRefresh ?? this.autoRefresh,
         error: error,
+        screenshotError: screenshotError,
         isLoading: isLoading ?? this.isLoading,
         profile: profile ?? this.profile,
       );
@@ -142,6 +147,25 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
     _init();
   }
 
+  String _humanizeError(Object error) {
+    final raw = error.toString();
+    final lower = raw.toLowerCase();
+
+    if (lower.contains('minified:')) {
+      return 'Browser request failed (frontend runtime error). Please retry refresh/sync.';
+    }
+    if (lower.contains('401') || lower.contains('403') || lower.contains('unauthorized')) {
+      return 'Browser auth failed. Please re-open the session and try again.';
+    }
+    if (lower.contains('top-level targets')) {
+      return 'Browser target was not a top-level page. Re-sync tabs and try again.';
+    }
+    if (lower.contains('network') || lower.contains('failed to fetch') || lower.contains('xmlhttprequest')) {
+      return 'Browser network request failed. Please retry.';
+    }
+    return raw;
+  }
+
   void _init() {
     // Fetch initial status
     refreshStatus();
@@ -153,7 +177,9 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
     if (_disposed) return;
     state = state.copyWith(autoRefresh: true);
     _pollTimer = Timer.periodic(interval, (_) {
-      if (!_disposed && state.autoRefresh && state.runState == BrowserRunState.running) {
+      if (!_disposed &&
+          state.autoRefresh &&
+          state.runState == BrowserRunState.running) {
         _refreshScreenshot();
       }
     });
@@ -183,8 +209,7 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
       if (_disposed) return;
 
       final running = result['running'] as bool? ??
-          result['status'] == 'running' ||
-          result['status'] == 'connected';
+          result['status'] == 'running' || result['status'] == 'connected';
 
       state = state.copyWith(
         runState: running ? BrowserRunState.running : BrowserRunState.stopped,
@@ -193,10 +218,7 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
 
       if (running) {
         // Fetch tabs and screenshot in parallel
-        await Future.wait([
-          refreshTabs(),
-          _refreshScreenshot(),
-        ]);
+        await Future.wait([refreshTabs(), _refreshScreenshot()]);
         if (state.autoRefresh && _pollTimer == null) {
           startPolling();
         }
@@ -206,7 +228,7 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
       if (kDebugMode) debugPrint('[Browser] status error: $e');
       state = state.copyWith(
         runState: BrowserRunState.error,
-        error: e.toString(),
+        error: _humanizeError(e),
       );
     }
   }
@@ -214,7 +236,11 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
   /// Start the managed browser.
   Future<void> startBrowser() async {
     if (_disposed) return;
-    state = state.copyWith(runState: BrowserRunState.starting, isLoading: true, error: null);
+    state = state.copyWith(
+      runState: BrowserRunState.starting,
+      isLoading: true,
+      error: null,
+    );
     try {
       final client = _ref.read(gatewayClientProvider);
       await client.browserStart(profile: state.profile);
@@ -224,7 +250,10 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
       await Future.delayed(const Duration(milliseconds: 1500));
       if (_disposed) return;
 
-      state = state.copyWith(runState: BrowserRunState.running, isLoading: false);
+      state = state.copyWith(
+        runState: BrowserRunState.running,
+        isLoading: false,
+      );
       await Future.wait([refreshTabs(), _refreshScreenshot()]);
       startPolling();
     } catch (e) {
@@ -233,7 +262,7 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
       state = state.copyWith(
         runState: BrowserRunState.error,
         isLoading: false,
-        error: e.toString(),
+        error: _humanizeError(e),
       );
     }
   }
@@ -260,7 +289,7 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
       );
     } catch (e) {
       if (_disposed) return;
-      state = state.copyWith(isLoading: false, error: e.toString());
+      state = state.copyWith(isLoading: false, error: _humanizeError(e));
     }
   }
 
@@ -273,22 +302,29 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
       if (_disposed) return;
 
       final rawTabs = result['tabs'] as List<dynamic>? ?? [];
-      final tabs = rawTabs
+      final parsedTabs = rawTabs
           .whereType<Map<String, dynamic>>()
           .map((t) => BrowserTab.fromJson(t))
           .toList();
+      final tabs = parsedTabs.where((t) => t.type == 'page').toList();
 
       // Find active tab
       final activeTab = tabs.firstWhere(
         (t) => t.active,
-        orElse: () => tabs.isNotEmpty ? tabs.first : const BrowserTab(targetId: '', title: '', url: ''),
+        orElse: () => tabs.isNotEmpty
+            ? tabs.first
+            : const BrowserTab(targetId: '', title: '', url: ''),
       );
 
       state = state.copyWith(
         tabs: tabs,
         activeTabId: activeTab.targetId.isNotEmpty ? activeTab.targetId : null,
         currentUrl: activeTab.url.isNotEmpty ? activeTab.url : state.currentUrl,
-        pageTitle: activeTab.title.isNotEmpty ? activeTab.title : state.pageTitle,
+        pageTitle:
+            activeTab.title.isNotEmpty ? activeTab.title : state.pageTitle,
+        error: tabs.isEmpty && parsedTabs.isNotEmpty
+            ? 'No top-level page tabs available (browser is focused on iframe/worker targets).'
+            : state.error,
       );
     } catch (e) {
       if (_disposed) return;
@@ -307,7 +343,24 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
       final client = _ref.read(gatewayClientProvider);
 
       // Step 1: Take the screenshot via browser control API
-      final result = await client.browserScreenshot(profile: state.profile);
+      Map<String, dynamic> result;
+      try {
+        result = await client.browserScreenshot(profile: state.profile);
+      } catch (e) {
+        final msg = e.toString();
+        if (msg.contains('top-level targets')) {
+          await refreshTabs();
+          if (_disposed) return;
+          if (state.tabs.isNotEmpty) {
+            await client.browserTabFocus(state.tabs.first.targetId,
+                profile: state.profile);
+            if (_disposed) return;
+          }
+          result = await client.browserScreenshot(profile: state.profile);
+        } else {
+          rethrow;
+        }
+      }
       if (_disposed) return;
 
       final screenshotPath = result['path'] as String?;
@@ -337,12 +390,25 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
           state = state.copyWith(
             screenshotBytes: Uint8List.view(buffer),
             error: null,
+            screenshotError: null,
+          );
+        } else {
+          state = state.copyWith(
+            screenshotError: 'Invalid screenshot payload from browser endpoint',
           );
         }
+      } else {
+        state = state.copyWith(
+          screenshotError: 'Screenshot fetch failed (${imgResp.status})',
+        );
       }
     } catch (e) {
       if (_disposed) return;
       if (kDebugMode) debugPrint('[Browser] screenshot error: $e');
+      state = state.copyWith(
+        screenshotError: _humanizeError(e),
+        error: _humanizeError(e),
+      );
     }
   }
 
@@ -355,8 +421,9 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
   }
 
   /// Fetch interactive snapshot with element refs.
-  Future<void> refreshSnapshot() async {
-    if (_disposed) return;
+  /// Returns number of refs parsed; returns -1 on error.
+  Future<int> refreshSnapshot() async {
+    if (_disposed) return 0;
     try {
       final client = _ref.read(gatewayClientProvider);
       final result = await client.browserSnapshot(
@@ -364,16 +431,63 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
         interactive: true,
         compact: true,
       );
-      if (_disposed) return;
+      if (_disposed) return 0;
 
       final text = result['snapshot'] as String? ??
           result['content'] as String? ??
           result['text'] as String? ??
           '';
-      state = state.copyWith(snapshotText: text);
+      final refsObj = result['refs'];
+      final refs = <SnapshotRef>[];
+      if (refsObj is Map<String, dynamic>) {
+        refsObj.forEach((key, value) {
+          if (value is Map<String, dynamic>) {
+            refs.add(
+              SnapshotRef(
+                ref: key,
+                role: value['role'] as String? ?? '',
+                name: value['name'] as String? ?? '',
+              ),
+            );
+          }
+        });
+      }
+      refs.sort((a, b) => a.ref.compareTo(b.ref));
+      state = state.copyWith(
+        snapshotText: text,
+        snapshotRefs: refs,
+        error: null,
+      );
+      return refs.length;
+    } catch (e) {
+      if (_disposed) return -1;
+      if (kDebugMode) debugPrint('[Browser] snapshot error: $e');
+      state = state.copyWith(error: _humanizeError(e));
+      return -1;
+    }
+  }
+
+  Future<void> setViewportSize(int width, int height) async {
+    if (_disposed) return;
+    final safeWidth = width.clamp(320, 3840).toInt();
+    final safeHeight = height.clamp(240, 2160).toInt();
+    if (safeWidth == state.viewportWidth &&
+        safeHeight == state.viewportHeight) {
+      return;
+    }
+
+    state = state.copyWith(
+      viewportWidth: safeWidth,
+      viewportHeight: safeHeight,
+    );
+    if (state.runState != BrowserRunState.running) return;
+
+    try {
+      final client = _ref.read(gatewayClientProvider);
+      await client.browserResize(safeWidth, safeHeight, profile: state.profile);
     } catch (e) {
       if (_disposed) return;
-      if (kDebugMode) debugPrint('[Browser] snapshot error: $e');
+      if (kDebugMode) debugPrint('[Browser] resize error: $e');
     }
   }
 
@@ -393,7 +507,7 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
       if (!_disposed) await Future.wait([refreshTabs(), _refreshScreenshot()]);
     } catch (e) {
       if (_disposed) return;
-      state = state.copyWith(isLoading: false, error: e.toString());
+      state = state.copyWith(isLoading: false, error: _humanizeError(e));
     }
   }
 
@@ -410,7 +524,7 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
     } catch (e) {
       if (_disposed) return;
       if (kDebugMode) debugPrint('[Browser] click error: $e');
-      state = state.copyWith(error: e.toString());
+      state = state.copyWith(error: _humanizeError(e));
     }
   }
 
@@ -532,6 +646,8 @@ class BrowserNotifier extends StateNotifier<BrowserState> {
 // Riverpod provider
 // ---------------------------------------------------------------------------
 
-final browserProvider = StateNotifierProvider<BrowserNotifier, BrowserState>((ref) {
+final browserProvider = StateNotifierProvider<BrowserNotifier, BrowserState>((
+  ref,
+) {
   return BrowserNotifier(ref);
 });

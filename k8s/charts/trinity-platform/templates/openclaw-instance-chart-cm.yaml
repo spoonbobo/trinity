@@ -114,8 +114,15 @@ data:
           },
           "browser": {
             "enabled": true,
+            "defaultProfile": "openclaw",
             "headless": true,
-            "noSandbox": true
+            "noSandbox": true,
+            "profiles": {
+              "openclaw": {
+                "cdpPort": 18800,
+                "color": "#FF4500"
+              }
+            }
           }
         }
 
@@ -164,17 +171,20 @@ data:
               image: {{`{{ include "openclaw.image" . }}`}}
               imagePullPolicy: {{`{{ .Values.imagePullPolicy }}`}}
               command:
+                - /usr/local/bin/bootstrap-openclaw.sh
+              args:
                 - openclaw
                 - gateway
                 - "--port"
                 - {{`{{ .Values.port | quote }}`}}
                 - "--bind"
                 - "lan"
+                - "--allow-unconfigured"
               ports:
                 - containerPort: {{`{{ .Values.port }}`}}
                   name: gateway
                 - containerPort: 18793
-                  name: opencode-api
+                  name: browser-ctl
               env:
                 - name: OPENCLAW_GATEWAY_TOKEN
                   valueFrom:
@@ -267,7 +277,7 @@ data:
           targetPort: gateway
           name: gateway
         - port: 18793
-          targetPort: opencode-api
-          name: opencode-api
+          targetPort: browser-ctl
+          name: browser-ctl
       selector:
         {{`{{- include "openclaw.selectorLabels" . | nindent 4 }}`}}

@@ -43,12 +43,15 @@ spec:
           image: {{ include "openclaw.image" . }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           command:
+            - /usr/local/bin/bootstrap-openclaw.sh
+          args:
             - openclaw
             - gateway
             - "--port"
             - {{ .Values.port | quote }}
             - "--bind"
             - "lan"
+            - "--allow-unconfigured"
           ports:
             - containerPort: {{ .Values.port }}
               name: gateway

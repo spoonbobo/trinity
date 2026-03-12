@@ -462,14 +462,12 @@ class GatewayClient extends ChangeNotifier {
   Future<Map<String, dynamic>> browserTabClose(String targetId, {String profile = 'openclaw'}) =>
       browserApiDelete('/tabs/$targetId', profile: profile);
 
-  /// Take a screenshot (returns base64 PNG in response).
+  /// Take a screenshot (returns a JSON payload with a saved PNG path).
   Future<Map<String, dynamic>> browserScreenshot({
     String profile = 'openclaw',
     bool fullPage = false,
   }) =>
-      browserApiPost('/screenshot', body: {
-        if (fullPage) 'fullPage': true,
-      }, profile: profile);
+      browserApiPost('/screenshot', body: {'fullPage': fullPage}, profile: profile);
 
   /// Get an interactive ARIA snapshot with refs.
   Future<Map<String, dynamic>> browserSnapshot({
