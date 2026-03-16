@@ -12,6 +12,10 @@ import '../../core/gateway_client.dart' as gw;
 import '../../models/ws_frame.dart';
 import '../../core/providers.dart';
 
+export 'chat_entry.dart';
+import 'chat_entry.dart';
+import 'chat_stream_processor.dart';
+
 String _formatTimestamp(DateTime ts) {
   final h = ts.hour.toString().padLeft(2, '0');
   final m = ts.minute.toString().padLeft(2, '0');
@@ -41,153 +45,10 @@ String _resolveMediaHref(String href, {String? authToken, String? openclawId}) {
   return uri.replace(queryParameters: qp.isEmpty ? null : qp).toString();
 }
 
-/// A single entry in the chat stream.
-class ChatEntry {
-  final String role; // 'user', 'assistant', 'tool', 'system'
-  final String content;
-  final String? toolName;
-  final String? toolCallId; // e.g. 'functions.read:0' -- used to match results to calls
-  final bool isStreaming;
-  final DateTime timestamp;
-  final List<Map<String, dynamic>>? attachments;
-  final Map<String, dynamic>? metadata; // Parsed tool args (command, path, etc.)
-  final DateTime? startedAt; // When tool call started (for duration tracking)
-  final Duration? elapsed; // How long the tool call took
+// ChatEntry is now in chat_entry.dart (re-exported above)
 
-  ChatEntry({
-    required this.role,
-    required this.content,
-    this.toolName,
-    this.toolCallId,
-    this.isStreaming = false,
-    this.attachments,
-    this.metadata,
-    this.startedAt,
-    this.elapsed,
-    DateTime? timestamp,
-  }) : timestamp = timestamp ?? DateTime.now();
-
-  ChatEntry copyWith({
-    String? content,
-    bool? isStreaming,
-    Duration? elapsed,
-  }) =>
-      ChatEntry(
-        role: role,
-        content: content ?? this.content,
-        toolName: toolName,
-        toolCallId: toolCallId,
-        isStreaming: isStreaming ?? this.isStreaming,
-        attachments: attachments,
-        metadata: metadata,
-        startedAt: startedAt,
-        elapsed: elapsed ?? this.elapsed,
-        timestamp: timestamp,
-      );
-
-  /// Try to parse a stringified args blob into structured metadata.
-  /// Returns null if content is empty or not valid JSON.
-  static Map<String, dynamic>? parseToolMetadata(String? toolName, String args) {
-    if (args.isEmpty) return null;
-    try {
-      final parsed = json.decode(args);
-      if (parsed is Map<String, dynamic>) return parsed;
-    } catch (_) {
-      // Not JSON -- try to extract key info from plain text
-    }
-    return null;
-  }
-
-  /// Parse tool args from either a JSON string or structured object.
-  static Map<String, dynamic>? parseToolMetadataDynamic(String? toolName, dynamic args) {
-    if (args == null) return null;
-    if (args is Map<String, dynamic>) return args;
-    if (args is Map) {
-      return args.map((k, v) => MapEntry('$k', v));
-    }
-    if (args is String) {
-      return parseToolMetadata(toolName, args);
-    }
-    return null;
-  }
-
-  /// Human-readable summary of tool metadata for display.
-  /// Returns a short description line (e.g. "ls -la" for exec, "src/main.dart" for read).
-  String? get metadataSummary {
-    final m = metadata;
-    if (m == null) return null;
-    final name = toolName ?? '';
-
-    // exec / bash: show command
-    if (name == 'exec' || name == 'bash' || name == 'Bash') {
-      final cmd = m['command'] as String? ?? m['cmd'] as String? ?? '';
-      if (cmd.isNotEmpty) return cmd;
-    }
-
-    // read / write / edit: show file path
-    if (name == 'read' || name == 'Read' || name == 'write' || name == 'Write' ||
-        name == 'edit' || name == 'Edit') {
-      final path = m['filePath'] as String? ?? m['path'] as String? ??
-          m['file'] as String? ?? '';
-      if (path.isNotEmpty) return path;
-    }
-
-    // glob: show pattern
-    if (name == 'glob' || name == 'Glob') {
-      final pattern = m['pattern'] as String? ?? '';
-      if (pattern.isNotEmpty) return pattern;
-    }
-
-    // grep: show pattern + include
-    if (name == 'grep' || name == 'Grep') {
-      final pattern = m['pattern'] as String? ?? '';
-      final include = m['include'] as String? ?? '';
-      if (pattern.isNotEmpty) {
-        return include.isNotEmpty ? '$pattern ($include)' : pattern;
-      }
-    }
-
-    // canvas_ui: just label it
-    if (name == 'canvas_ui') return 'rendering surface';
-
-    // Generic: try common field names
-    final cmd = m['command'] as String? ?? m['description'] as String? ??
-        m['query'] as String? ?? m['prompt'] as String? ?? '';
-    if (cmd.isNotEmpty) return cmd;
-
-    return null;
-  }
-
-  /// Secondary metadata line (workdir, host, path context).
-  String? get metadataDetail {
-    final m = metadata;
-    if (m == null) return null;
-    final parts = <String>[];
-    final name = toolName ?? '';
-
-    if (name == 'exec' || name == 'bash' || name == 'Bash') {
-      final workdir = m['workdir'] as String? ?? m['cwd'] as String? ?? '';
-      if (workdir.isNotEmpty) parts.add(workdir);
-      final host = m['host'] as String? ?? '';
-      if (host.isNotEmpty && host != 'sandbox') parts.add('host:$host');
-    }
-
-    if (name == 'read' || name == 'Read') {
-      final offset = m['offset'];
-      final limit = m['limit'];
-      if (offset != null || limit != null) {
-        parts.add('lines ${offset ?? 1}-${((offset as int?) ?? 1) + ((limit as int?) ?? 2000)}');
-      }
-    }
-
-    if (name == 'grep' || name == 'Grep') {
-      final path = m['path'] as String? ?? '';
-      if (path.isNotEmpty) parts.add(path);
-    }
-
-    return parts.isEmpty ? null : parts.join('  ');
-  }
-}
+// (metadataSummary, metadataDetail, parseToolMetadata, parseToolMetadataDynamic
+//  are now in chat_entry.dart)
 
 class ChatStreamView extends ConsumerStatefulWidget {
   const ChatStreamView({super.key});
@@ -197,16 +58,13 @@ class ChatStreamView extends ConsumerStatefulWidget {
 }
 
 class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
-  static const int _maxEntries = 500;
-  final List<ChatEntry> _entries = [];
+  final _processor = ChatStreamProcessor();
   final _scrollController = ScrollController();
   StreamSubscription<WsEvent>? _chatSub;
-  bool _agentThinking = false;
   bool _showScrollToBottom = false;
   String _currentSession = 'main';
   bool _historyLoading = false; // Guard against concurrent history fetches
   int _lastRefreshTick = 0;
-  final List<_PendingUserEcho> _pendingUserEchoes = [];
   bool _disposed = false;
   gw.GatewayClient? _cachedClient; // Stored at subscribe time to avoid ref after dispose
 
@@ -220,7 +78,7 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
 
   void _onScrollPositionChanged() {
     if (_disposed) return;
-    final shouldShow = !_isNearBottom && _entries.isNotEmpty;
+    final shouldShow = !_isNearBottom && _processor.entries.isNotEmpty;
     if (shouldShow != _showScrollToBottom) {
       setState(() => _showScrollToBottom = shouldShow);
     }
@@ -263,68 +121,20 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
     final sessionKey = _disposed ? _currentSession : ref.read(activeSessionProvider);
     try {
       final response = await client.getChatHistory(sessionKey: sessionKey, limit: 50);
-      if (!mounted) { _historyLoading = false; return; } // Widget disposed during async gap
+      if (!mounted) { _historyLoading = false; return; }
       if (response.ok && response.payload != null) {
-        // Try 'messages' first, fall back to 'history' or 'entries'
         final messages = response.payload?['messages']
             ?? response.payload?['history']
             ?? response.payload?['entries'];
         if (messages is List) {
           setState(() {
-            _entries.clear();
-            for (final msg in messages) {
-              if (msg is! Map<String, dynamic>) continue;
-              // Extract displayable text from content (may be String or List of blocks)
-              var content = _extractContent(msg['content']);
-              // #10: Replace raw A2UI JSONL in history with friendly message
-              if (content.contains('__A2UI__')) {
-                content = 'Canvas updated';
-              }
-              // Extract timestamp from history (epoch ms or ISO string)
-              DateTime? timestamp;
-              final ts = msg['timestamp'] ?? msg['createdAt'] ?? msg['ts'];
-              if (ts is num) {
-                timestamp = DateTime.fromMillisecondsSinceEpoch(ts.toInt(), isUtc: true);
-              } else if (ts is String) {
-                timestamp = DateTime.tryParse(ts);
-              }
-              // Normalize gateway role names for rendering:
-              // 'toolResult' (gateway camelCase) -> 'tool' (Flutter card)
-              final rawRole = msg['role'] as String? ?? 'system';
-              final role = rawRole == 'toolResult' ? 'tool' : rawRole;
-              // Extract tool name and toolCallId for tool card labels + matching
-              final toolName = msg['toolName'] as String? ??
-                  msg['name'] as String? ??
-                  (role == 'tool' ? 'tool' : null);
-              final toolCallId = role == 'tool'
-                  ? (msg['toolCallId'] as String? ?? msg['id'] as String?)
-                  : null;
-              // Skip empty assistant entries -- these are tool-call-only messages
-              // whose tool calls appear as separate 'tool' role entries in history.
-              if (role == 'assistant' && content.isEmpty) continue;
-              // Extract image attachments from history content blocks
-              final historyAttachments = _extractImageAttachments(msg['content']);
-              // Try to extract structured metadata from tool entries
-              // History tool entries may include 'args' or 'input' alongside result content
-              Map<String, dynamic>? meta;
-              if (role == 'tool' && toolName != null) {
-                final argsRaw = msg['args']?.toString() ?? msg['input']?.toString() ?? '';
-                meta = ChatEntry.parseToolMetadata(toolName, argsRaw);
-              }
-              _entries.add(ChatEntry(
-                role: role,
-                content: content,
-                toolName: toolName,
-                toolCallId: toolCallId,
-                timestamp: timestamp,
-                metadata: meta,
-                attachments: historyAttachments.isNotEmpty ? historyAttachments : null,
-              ));
-            }
+            _processor.loadHistory(messages);
           });
-          // Seed _lastCanvasSurface from history so the poll doesn't
-          // re-render stale surfaces from previous runs.
-          _seedLastCanvasSurface(messages);
+          // Render any A2UI surfaces found in history
+          for (final payload in _processor.pendingA2UIPayloads) {
+            _handleA2UIToolResult(payload);
+          }
+          _processor.pendingA2UIPayloads.clear();
           _jumpToBottomAfterLayout();
         }
       }
@@ -335,553 +145,37 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
     }
   }
 
-  /// Extract displayable text from a message content field.
-  /// Handles both flat String content and the List<block> format
-  /// returned by the gateway (e.g. [{type:"text",text:"..."}, ...]).
-  static String _extractContent(dynamic rawContent) {
-    if (rawContent is String) return rawContent;
-    if (rawContent is List) {
-      final textParts = <String>[];
-      for (final block in rawContent) {
-        if (block is! Map<String, dynamic>) continue;
-        final type = block['type'] as String?;
-        if (type == 'text') {
-          final text = block['text'] as String? ?? '';
-          if (text.isNotEmpty) textParts.add(text);
-        }
-        // Skip 'thinking' and 'toolCall' blocks -- not user-visible in history
-      }
-      return textParts.join('\n').trim();
-    }
-    return '';
-  }
-
-  /// Extract image attachments from history content blocks.
-  /// Handles OpenAI-format image_url blocks with data URI base64.
-  static List<Map<String, dynamic>> _extractImageAttachments(dynamic rawContent) {
-    if (rawContent is! List) return const [];
-    final attachments = <Map<String, dynamic>>[];
-    for (final block in rawContent) {
-      if (block is! Map<String, dynamic>) continue;
-      final type = block['type'] as String?;
-      if (type == 'image_url') {
-        final imageUrl = block['image_url'];
-        if (imageUrl is Map<String, dynamic>) {
-          final url = imageUrl['url'] as String? ?? '';
-          // Parse data URI: data:image/jpeg;base64,<data>
-          final match = RegExp(r'^data:(image/[^;]+);base64,(.+)$').firstMatch(url);
-          if (match != null) {
-            attachments.add({
-              'content': match.group(2)!,
-              'mimeType': match.group(1)!,
-              'fileName': 'image',
-              'type': 'image',
-            });
-          }
-        }
-      }
-    }
-    return attachments;
-  }
-
-  /// Extract MEDIA: token paths from tool output and convert to media artifacts.
-  static final _mediaTokenExtractRe = RegExp(
-    r'MEDIA:\s*(.+)',
-    caseSensitive: false,
-    multiLine: true,
-  );
-  static const _workspacePrefix = '/home/node/.openclaw/workspace/';
-  static const _imageExts = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.tiff', '.tif'};
-  static const Map<String, String> _mimeByExt = {
-    '.pdf': 'application/pdf',
-    '.doc': 'application/msword',
-    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    '.txt': 'text/plain',
-    '.md': 'text/markdown',
-    '.json': 'application/json',
-    '.csv': 'text/csv',
-    '.xml': 'application/xml',
-    '.drawio': 'application/xml',
-    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    '.xls': 'application/vnd.ms-excel',
-    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    '.ppt': 'application/vnd.ms-powerpoint',
-    '.zip': 'application/zip',
-  };
-
-  static bool _isImagePath(String path) {
-    final lower = path.toLowerCase();
-    return _imageExts.any((ext) => lower.endsWith(ext));
-  }
-
-  static String _guessMimeType(String path) {
-    final lower = path.toLowerCase();
-    for (final entry in _mimeByExt.entries) {
-      if (lower.endsWith(entry.key)) return entry.value;
-    }
-    if (_isImagePath(path)) {
-      final ext = lower.contains('.') ? lower.substring(lower.lastIndexOf('.') + 1) : 'png';
-      return 'image/$ext';
-    }
-    return 'application/octet-stream';
-  }
-
-  static List<Map<String, dynamic>> _extractMediaArtifacts(String text) {
-    if (text.isEmpty) return const [];
-    final artifacts = <Map<String, dynamic>>[];
-    for (final match in _mediaTokenExtractRe.allMatches(text)) {
-      var raw = match.group(1)?.trim() ?? '';
-      // Strip surrounding backticks/quotes
-      while (raw.isNotEmpty && (raw[0] == '`' || raw[0] == '"' || raw[0] == "'")) {
-        raw = raw.substring(1);
-      }
-      while (raw.isNotEmpty && (raw[raw.length - 1] == '`' || raw[raw.length - 1] == '"' || raw[raw.length - 1] == "'")) {
-        raw = raw.substring(0, raw.length - 1);
-      }
-      raw = raw.trim();
-      if (raw.isEmpty) continue;
-      // Convert absolute workspace path to relative
-      String relative;
-      if (raw.startsWith(_workspacePrefix)) {
-        relative = raw.substring(_workspacePrefix.length);
-      } else if (raw.startsWith('/')) {
-        // Absolute path outside workspace -- skip (security)
-        continue;
-      } else {
-        relative = raw;
-      }
-      if (relative.startsWith('media/')) {
-        relative = relative.substring('media/'.length);
-      }
-      final fileName = relative.contains('/') ? relative.substring(relative.lastIndexOf('/') + 1) : relative;
-      artifacts.add({
-        'url': '/__openclaw__/media/$relative',
-        'fileName': fileName,
-        'mimeType': _guessMimeType(relative),
-        'isImage': _isImagePath(relative),
-      });
-    }
-    return artifacts;
-  }
-
-  void _seedLastCanvasSurface(List<dynamic> messages) {
-    for (int i = messages.length - 1; i >= 0; i--) {
-      final msg = messages[i];
-      if (msg is! Map<String, dynamic>) continue;
-      final role = msg['role'] as String?;
-      if (role != 'tool' && role != 'toolResult') continue;
-      final contentList = msg['content'];
-      if (contentList is! List) continue;
-      for (final block in contentList) {
-        if (block is! Map<String, dynamic>) continue;
-        final text = block['text'] as String?;
-        if (text != null && text.contains('__A2UI__')) {
-          final payload = _extractA2UIText(text);
-          if (payload == null) continue;
-          _lastCanvasSurface = payload;
-          // Also render it to the canvas so the last surface shows on load
-          _handleA2UIToolResult(payload);
-          return;
-        }
-      }
-    }
-  }
-
-  /// Evict oldest entries if we exceed capacity
-  void _capEntries() {
-    if (_entries.length > _maxEntries) {
-      _entries.removeRange(0, _entries.length - _maxEntries);
-    }
-  }
-
-  /// Find the matching tool entry and update its content.
-  /// When [toolCallId] is provided, searches for the exact entry with that ID
-  /// (required for parallel tool calls like 3 concurrent reads).
-  /// Falls back to the most recent tool entry within the current turn if
-  /// no ID match is found (backward compat with older gateway versions).
-  void _updateLastToolEntry(String content, {
-    bool isStreaming = false,
-    String? toolCallId,
-  }) {
-    // First pass: match by toolCallId if available
-    if (toolCallId != null && toolCallId.isNotEmpty) {
-      for (int i = _entries.length - 1; i >= 0; i--) {
-        if (_entries[i].role == 'tool' &&
-            _entries[i].toolCallId == toolCallId) {
-          final elapsed = _entries[i].startedAt != null
-              ? DateTime.now().difference(_entries[i].startedAt!)
-              : null;
-          _entries[i] = _entries[i].copyWith(
-            content: content,
-            isStreaming: isStreaming,
-            elapsed: elapsed,
-          );
-          return;
-        }
-        if (_entries[i].role == 'user') break;
-      }
-    }
-    // Fallback: find the most recent tool entry in the current turn
-    for (int i = _entries.length - 1; i >= 0; i--) {
-      if (_entries[i].role == 'tool') {
-        final elapsed = _entries[i].startedAt != null
-            ? DateTime.now().difference(_entries[i].startedAt!)
-            : null;
-        _entries[i] = _entries[i].copyWith(
-          content: content,
-          isStreaming: isStreaming,
-          elapsed: elapsed,
-        );
-        return;
-      }
-      if (_entries[i].role == 'user') break;
-    }
-  }
+  // Static helpers and event processing logic are now in ChatStreamProcessor.
 
   void _handleChatEvent(WsEvent event) {
     try {
-      _handleChatEventInner(event);
-      _capEntries();
+      final changed = _processor.processEvent(event);
+      // Handle A2UI events emitted by processor
+      for (final payload in _processor.pendingA2UIPayloads) {
+        _handleA2UIToolResult(payload);
+      }
+      _processor.pendingA2UIPayloads.clear();
+      // Poll for canvas surface if tool calls were detected
+      if (_processor.currentRunHadToolGap) {
+        _pollCanvasSurface();
+      }
+      if (changed) setState(() {});
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Chat] error handling event: $e\n$st');
     }
-    // #11: Only auto-scroll if user is near the bottom
     _smartScrollToBottom();
   }
-
-  void _handleChatEventInner(WsEvent event) {
-    final payload = event.payload;
-
-    if (event.event == 'chat') {
-      final state = payload['state'] as String?;
-      final type = payload['type'] as String?;
-
-      if (type == 'message' && payload['role'] == 'user') {
-        final isLocalEcho = payload['localEcho'] == true;
-        final content = payload['content'] as String? ?? '';
-        final idempotencyKey = payload['idempotencyKey'] as String?;
-        final rawAttachments = payload['attachments'];
-        List<Map<String, dynamic>>? attachments;
-        if (rawAttachments is List) {
-          attachments = rawAttachments
-              .whereType<Map<String, dynamic>>()
-              .toList();
-        }
-
-        if (isLocalEcho) {
-          _recordOptimisticUser(content, idempotencyKey: idempotencyKey);
-        } else if (_consumeOptimisticUser(content, idempotencyKey: idempotencyKey)) {
-          return;
-        }
-
-        setState(() {
-          if (!isLocalEcho &&
-              _entries.isNotEmpty &&
-              _entries.last.role == 'user' &&
-              _entries.last.content == content) {
-            return;
-          }
-          _entries.add(ChatEntry(
-            role: 'user',
-            content: content,
-            attachments: attachments,
-          ));
-        });
-      } else if (state == 'delta' || state == 'final' || state == 'aborted') {
-        final message = payload['message'];
-        if (message is! Map<String, dynamic>) return;
-        final assistantStreamKey = _assistantStreamKey(payload, message);
-        final contentList = message['content'];
-        if (contentList is! List || contentList.isEmpty) return;
-        // Scan for the first 'text' block instead of blindly taking
-        // contentList[0], which may be a 'thinking' block.
-        String text = '';
-        for (final block in contentList) {
-          if (block is Map<String, dynamic> && block['type'] == 'text') {
-            text = block['text'] as String? ?? '';
-            break;
-          }
-        }
-        if (state == 'final' || state == 'aborted') {
-          final keyedIdx = assistantStreamKey == null
-              ? -1
-              : _findAssistantIndexByStreamKey(assistantStreamKey);
-          final streamingIdx = keyedIdx != -1
-              ? keyedIdx
-              : _entries.lastIndexWhere(
-                  (e) => e.role == 'assistant' && e.isStreaming,
-                );
-          setState(() {
-            _agentThinking = false;
-            if (streamingIdx != -1) {
-              if (text.isEmpty) {
-                // Remove the streaming placeholder -- it was a tool-only turn
-                _entries.removeAt(streamingIdx);
-              } else {
-                _entries[streamingIdx] = _entries[streamingIdx].copyWith(
-                  content: text,
-                  isStreaming: false,
-                );
-              }
-            } else if (text.isNotEmpty) {
-              final lastAssistantIdx = _entries.lastIndexWhere((e) => e.role == 'assistant');
-              if (lastAssistantIdx != -1 &&
-                  !_entries[lastAssistantIdx].isStreaming &&
-                  _entries[lastAssistantIdx].content == text) {
-                return;
-              }
-              _entries.add(ChatEntry(role: 'assistant', content: text));
-            }
-          });
-        } else {
-          final keyedStreamingIdx = assistantStreamKey == null
-              ? -1
-              : _findAssistantIndexByStreamKey(assistantStreamKey, requireStreaming: true);
-          final keyedIdx = assistantStreamKey == null
-              ? -1
-              : _findAssistantIndexByStreamKey(assistantStreamKey);
-          final streamingIdx = keyedStreamingIdx != -1
-              ? keyedStreamingIdx
-              : (keyedIdx != -1
-                  ? keyedIdx
-                  : _entries.lastIndexWhere(
-                      (e) => e.role == 'assistant' && e.isStreaming,
-                    ));
-          setState(() {
-            _agentThinking = false;
-            if (streamingIdx != -1) {
-              _entries[streamingIdx] = _entries[streamingIdx].copyWith(
-                content: text,
-                isStreaming: true,
-              );
-            } else if (text.isNotEmpty) {
-              // Only create a new streaming entry if there's actual text.
-              // Tool-only turns show tool cards instead.
-              _entries.add(ChatEntry(
-                role: 'assistant',
-                content: text,
-                isStreaming: true,
-                metadata: assistantStreamKey == null
-                    ? null
-                    : {'_streamKey': assistantStreamKey},
-              ));
-            }
-          });
-        }
-      }
-    } else if (event.event == 'agent') {
-      final stream = payload['stream'] as String?;
-      final data = payload['data'];
-      final dataMap = data is Map<String, dynamic> ? data : null;
-
-      // Detect tool call seq gap: lifecycle start is seq 1.
-      // If first assistant event has seq >= 3, tool calls happened in between.
-      if (stream == 'assistant' && _currentRunFirstAssistantSeq == null) {
-        final seq = payload['seq'];
-        if (seq is int) {
-          _currentRunFirstAssistantSeq = seq;
-          if (seq >= 3) {
-            _currentRunHadToolGap = true;
-          }
-        }
-      }
-
-      if (stream == 'lifecycle') {
-        final phase = dataMap?['phase'] as String?;
-        if (phase == 'start') {
-          setState(() => _agentThinking = true);
-          _currentRunHadToolGap = false;
-          _currentRunFirstAssistantSeq = null;
-        } else if (phase == 'end') {
-          setState(() {
-            _agentThinking = false;
-            // Clear stale streaming state for tool cards only.
-            // Keep assistant streaming entry intact so a later chat.final
-            // can replace it instead of appending a second assistant bubble.
-            for (int i = _entries.length - 1; i >= 0; i--) {
-              if (_entries[i].isStreaming && _entries[i].role == 'tool') {
-                _entries[i] = _entries[i].copyWith(isStreaming: false);
-              }
-              if (_entries[i].role == 'user') break;
-            }
-          });
-          // Only poll for canvas surface if tool calls were detected (seq gap)
-          if (_currentRunHadToolGap) {
-            _pollCanvasSurface();
-          }
-        }
-      } else if (stream == 'tool_call' || stream == 'tool') {
-        // Handle both tool_call (legacy) and tool (current gateway) stream names
-        final toolName = dataMap?['tool'] as String? ??
-            dataMap?['name'] as String? ??
-            'tool';
-        final phase = dataMap?['phase'] as String?;
-        final toolCallId = dataMap?['id'] as String? ??
-            dataMap?['toolCallId'] as String?;
-        final result = dataMap?['result']?.toString() ??
-            dataMap?['output']?.toString() ??
-            '';
-
-        if (phase == 'end' || phase == 'result') {
-          // Tool finished — check for A2UI marker
-          final a2uiPayload = _extractA2UIText(result);
-          if (a2uiPayload != null) {
-            _handleA2UIToolResult(a2uiPayload);
-            setState(() {
-              _updateLastToolEntry('Canvas updated', toolCallId: toolCallId);
-            });
-          } else {
-            // Extract MEDIA: tokens from tool result and render returned files.
-            final mediaArtifacts = _extractMediaArtifacts(result);
-            final displayResult = result.isNotEmpty ? result : 'Done';
-            setState(() {
-              _updateLastToolEntry(displayResult, toolCallId: toolCallId);
-              for (final artifact in mediaArtifacts) {
-                final url = artifact['url'] as String? ?? '';
-                final name = artifact['fileName'] as String? ?? 'file';
-                final mimeType = artifact['mimeType'] as String? ?? 'application/octet-stream';
-                final isImage = artifact['isImage'] == true;
-                _entries.add(ChatEntry(
-                  role: 'assistant',
-                  content: isImage ? '![Generated image]($url)' : '[Generated file: $name]($url)',
-                  attachments: isImage
-                      ? null
-                      : [
-                          {
-                            'fileName': name,
-                            'mimeType': mimeType,
-                            'url': url,
-                            'type': 'file',
-                          }
-                        ],
-                ));
-              }
-              _capEntries();
-            });
-          }
-        } else {
-          // Tool started or in progress
-          final argsRaw = dataMap?['args'];
-          final argsText = argsRaw?.toString() ?? '';
-          final meta = ChatEntry.parseToolMetadataDynamic(toolName, argsRaw);
-          setState(() {
-            _agentThinking = false; // Clear thinking indicator -- tool card replaces it
-            _entries.add(ChatEntry(
-              role: 'tool',
-              content: argsText,
-              toolName: toolName,
-              toolCallId: toolCallId,
-              isStreaming: true,
-              metadata: meta,
-              startedAt: DateTime.now(),
-            ));
-          });
-        }
-      } else if (stream == 'tool_result') {
-        final toolCallId = dataMap?['id'] as String? ??
-            dataMap?['toolCallId'] as String?;
-        final result = dataMap?['result']?.toString() ??
-            dataMap?['output']?.toString() ??
-            '';
-        final a2uiPayload = _extractA2UIText(result);
-        if (a2uiPayload != null) {
-          _handleA2UIToolResult(a2uiPayload);
-          setState(() {
-            _updateLastToolEntry('Canvas updated', toolCallId: toolCallId);
-          });
-        } else {
-          setState(() {
-            _updateLastToolEntry(result.isNotEmpty ? result : 'Done',
-                toolCallId: toolCallId);
-          });
-        }
-      }
-    }
-  }
-
-  void _recordOptimisticUser(String content, {String? idempotencyKey}) {
-    final now = DateTime.now();
-    _pendingUserEchoes.add(_PendingUserEcho(
-      content: content,
-      idempotencyKey: idempotencyKey,
-      createdAt: now,
-    ));
-    _pendingUserEchoes.removeWhere(
-      (entry) => now.difference(entry.createdAt).inSeconds > 20,
-    );
-  }
-
-  bool _consumeOptimisticUser(String content, {String? idempotencyKey}) {
-    final now = DateTime.now();
-    _pendingUserEchoes.removeWhere(
-      (entry) => now.difference(entry.createdAt).inSeconds > 20,
-    );
-
-    for (int i = 0; i < _pendingUserEchoes.length; i++) {
-      final pending = _pendingUserEchoes[i];
-      final sameId = idempotencyKey != null &&
-          pending.idempotencyKey != null &&
-          pending.idempotencyKey == idempotencyKey;
-      final sameContent = pending.content == content;
-      if (sameId || sameContent) {
-        _pendingUserEchoes.removeAt(i);
-        return true;
-      }
-    }
-    return false;
-  }
-
-  String? _assistantStreamKey(
-    Map<String, dynamic> payload,
-    Map<String, dynamic> message,
-  ) {
-    final candidates = [
-      message['id'],
-      message['messageId'],
-      payload['messageId'],
-      payload['id'],
-      payload['runId'],
-      message['runId'],
-      payload['turnId'],
-      message['turnId'],
-    ];
-    for (final candidate in candidates) {
-      final value = candidate?.toString();
-      if (value != null && value.isNotEmpty) return value;
-    }
-    return null;
-  }
-
-  int _findAssistantIndexByStreamKey(
-    String streamKey, {
-    bool requireStreaming = false,
-  }) {
-    for (int i = _entries.length - 1; i >= 0; i--) {
-      final entry = _entries[i];
-      if (entry.role != 'assistant') continue;
-      if (requireStreaming && !entry.isStreaming) continue;
-      final key = entry.metadata?['_streamKey']?.toString();
-      if (key == streamKey) return i;
-    }
-    return -1;
-  }
-
-  String? _lastCanvasSurface;
-  bool _currentRunHadToolGap = false;
-  int? _currentRunFirstAssistantSeq;
 
   Future<void> _pollCanvasSurface() async {
     if (_disposed) return;
     try {
       final gw.GatewayClient client = _cachedClient ?? ref.read(gatewayClientProvider);
       final sessionKey = ref.read(activeSessionProvider);
-      // Fetch recent history and scan for __A2UI__ in tool results
       final response = await client.getChatHistory(sessionKey: sessionKey, limit: 10);
       if (!response.ok || response.payload == null) return;
       final messages = response.payload!['messages'];
       if (messages is! List) return;
 
-      // Walk backwards to find the most recent __A2UI__ tool result
       for (int i = messages.length - 1; i >= 0; i--) {
         final msg = messages[i];
         if (msg is! Map<String, dynamic>) continue;
@@ -893,42 +187,37 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
           if (block is! Map<String, dynamic>) continue;
           final text = block['text'] as String?;
           if (text != null && text.contains('__A2UI__')) {
-            final payload = _extractA2UIText(text);
-            if (payload == null || payload == _lastCanvasSurface) {
+            final payload = ChatStreamProcessor.extractA2UIText(text);
+            if (payload == null || payload == _processor.lastCanvasSurface) {
               continue;
             }
-            _lastCanvasSurface = payload;
+            _processor.lastCanvasSurface = payload;
             if (kDebugMode) debugPrint('[Canvas] Found A2UI in history, rendering surface');
             _handleA2UIToolResult(payload);
             setState(() {
-              if (_entries.isEmpty || _entries.last.role != 'tool' || !_entries.last.isStreaming) {
-                _entries.add(ChatEntry(
+              final entries = _processor.entries;
+              if (entries.isEmpty || entries.last.role != 'tool' || !entries.last.isStreaming) {
+                entries.add(ChatEntry(
                    role: 'tool',
                    content: 'Canvas updated',
                    toolName: 'canvas_ui',
                   isStreaming: false,
                 ));
               } else {
-                _entries[_entries.length - 1] = _entries.last.copyWith(
+                entries[entries.length - 1] = entries.last.copyWith(
                    content: 'Canvas updated',
                   isStreaming: false,
                 );
               }
             });
             _scrollToBottom();
-            return; // Found and rendered, done
+            return;
           }
         }
       }
     } catch (e) {
       if (kDebugMode) debugPrint('[Canvas] poll error: $e');
     }
-  }
-
-  String? _extractA2UIText(String raw) {
-    final markerIndex = raw.indexOf('__A2UI__');
-    if (markerIndex < 0) return null;
-    return raw.substring(markerIndex);
   }
 
   void _handleA2UIToolResult(String result) {
@@ -1006,8 +295,7 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
     final sessionKey = ref.watch(activeSessionProvider);
     if (sessionKey != _currentSession) {
       _currentSession = sessionKey;
-      _entries.clear();
-      _agentThinking = false;
+      _processor.clear();
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadHistory());
     }
 
@@ -1018,7 +306,7 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
     }
 
     // #14 (chat): Better empty state with hint
-    if (_entries.isEmpty && !_agentThinking) {
+    if (_processor.entries.isEmpty && !_processor.agentThinking) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1058,13 +346,13 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
         ListView.builder(
           controller: _scrollController,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          itemCount: _entries.length + (_agentThinking ? 1 : 0),
+          itemCount: _processor.entries.length + (_processor.agentThinking ? 1 : 0),
           itemBuilder: (context, index) {
-            if (index == _entries.length && _agentThinking) {
+            if (index == _processor.entries.length && _processor.agentThinking) {
               return _buildThinkingIndicator(theme);
             }
-            final entry = _entries[index];
-            final prev = index > 0 ? _entries[index - 1] : null;
+            final entry = _processor.entries[index];
+            final prev = index > 0 ? _processor.entries[index - 1] : null;
             final isNewSender = prev == null || prev.role != entry.role;
             return _buildEntry(entry, theme, isNewSender: isNewSender);
           },
@@ -1158,17 +446,7 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
   }
 }
 
-class _PendingUserEcho {
-  final String content;
-  final String? idempotencyKey;
-  final DateTime createdAt;
-
-  const _PendingUserEcho({
-    required this.content,
-    required this.idempotencyKey,
-    required this.createdAt,
-  });
-}
+// PendingUserEcho is now in chat_stream_processor.dart
 
 class _UserBubble extends StatefulWidget {
   final ChatEntry entry;

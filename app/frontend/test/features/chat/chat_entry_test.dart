@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:trinity_shell/features/chat/chat_stream.dart';
+import 'package:trinity_shell/features/chat/chat_entry.dart';
 
 void main() {
   group('ChatEntry', () {
