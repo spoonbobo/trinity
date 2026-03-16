@@ -210,7 +210,14 @@ grafana:
       cpu: 50m
 
 site:
-  enabled: false
+  enabled: true
+  host: site.localhost
+  resources:
+    limits:
+      memory: 128Mi
+    requests:
+      memory: 64Mi
+      cpu: 25m
 
 fluentd:
   enabled: true
