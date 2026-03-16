@@ -18,6 +18,9 @@ export const metadata: Metadata = {
   title: "Trinity — One Brain. Every User.",
   description:
     "An empty screen. A single intelligence. Every person who connects teaches it something new. Private conversations, collective wisdom. The system doesn't exist until you speak.",
+  icons: {
+    icon: "/favicon.svg",
+  },
   openGraph: {
     title: "Trinity — One Brain. Every User.",
     description:
