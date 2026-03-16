@@ -149,14 +149,19 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
 
   void _handleChatEvent(WsEvent event) {
     try {
+      // Detect lifecycle:end so we can poll for canvas surfaces once.
+      final isLifecycleEnd = event.event == 'agent' &&
+          (event.payload['stream'] as String?) == 'lifecycle' &&
+          ((event.payload['data'] as Map<String, dynamic>?)?['phase']) == 'end';
+
       final changed = _processor.processEvent(event);
       // Handle A2UI events emitted by processor
       for (final payload in _processor.pendingA2UIPayloads) {
         _handleA2UIToolResult(payload);
       }
       _processor.pendingA2UIPayloads.clear();
-      // Poll for canvas surface if tool calls were detected
-      if (_processor.currentRunHadToolGap) {
+      // Poll for canvas surface ONCE when the run ends, if tool calls happened.
+      if (isLifecycleEnd && _processor.currentRunHadToolGap) {
         _pollCanvasSurface();
       }
       if (changed) setState(() {});
@@ -194,20 +199,28 @@ class _ChatStreamViewState extends ConsumerState<ChatStreamView> {
             _processor.lastCanvasSurface = payload;
             if (kDebugMode) debugPrint('[Canvas] Found A2UI in history, rendering surface');
             _handleA2UIToolResult(payload);
+            // Only add a "Canvas updated" card if one doesn't already
+            // exist in the current turn (the processor may have already
+            // created one from the streaming tool_result event).
             setState(() {
               final entries = _processor.entries;
-              if (entries.isEmpty || entries.last.role != 'tool' || !entries.last.isStreaming) {
+              bool alreadyHasCanvasCard = false;
+              for (int i = entries.length - 1; i >= 0; i--) {
+                if (entries[i].role == 'user') break;
+                if (entries[i].role == 'tool' &&
+                    entries[i].toolName == 'canvas_ui' &&
+                    entries[i].content == 'Canvas updated') {
+                  alreadyHasCanvasCard = true;
+                  break;
+                }
+              }
+              if (!alreadyHasCanvasCard) {
                 entries.add(ChatEntry(
-                   role: 'tool',
-                   content: 'Canvas updated',
-                   toolName: 'canvas_ui',
+                  role: 'tool',
+                  content: 'Canvas updated',
+                  toolName: 'canvas_ui',
                   isStreaming: false,
                 ));
-              } else {
-                entries[entries.length - 1] = entries.last.copyWith(
-                   content: 'Canvas updated',
-                  isStreaming: false,
-                );
               }
             });
             _scrollToBottom();
