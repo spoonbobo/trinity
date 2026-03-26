@@ -145,13 +145,13 @@ build_images() {
   eval "$(minikube docker-env)"
 
   local images=(
-    "trinity-auth-service:latest|$PROJECT_ROOT/app/auth-service|$PROJECT_ROOT/app/auth-service/Dockerfile"
-    "trinity-gateway-orchestrator:latest|$PROJECT_ROOT/app/gateway-orchestrator|$PROJECT_ROOT/app/gateway-orchestrator/Dockerfile"
-    "trinity-gateway-proxy:latest|$PROJECT_ROOT/app/gateway-proxy|$PROJECT_ROOT/app/gateway-proxy/Dockerfile"
-    "trinity-terminal-proxy:latest|$PROJECT_ROOT/app/terminal-proxy|$PROJECT_ROOT/app/terminal-proxy/Dockerfile"
-    "trinity-copilot:latest|$PROJECT_ROOT|$PROJECT_ROOT/app/copilot/Dockerfile"
-    "trinity-lightrag:latest|$PROJECT_ROOT/app/lightrag|$PROJECT_ROOT/app/lightrag/Dockerfile"
-    "trinity-frontend:latest|$PROJECT_ROOT/app/frontend|$PROJECT_ROOT/app/frontend/Dockerfile"
+    "trinity-auth-service:latest|$PROJECT_ROOT/src/auth-service|$PROJECT_ROOT/src/auth-service/Dockerfile"
+    "trinity-gateway-orchestrator:latest|$PROJECT_ROOT/src/gateway-orchestrator|$PROJECT_ROOT/src/gateway-orchestrator/Dockerfile"
+    "trinity-gateway-proxy:latest|$PROJECT_ROOT/src/gateway-proxy|$PROJECT_ROOT/src/gateway-proxy/Dockerfile"
+    "trinity-terminal-proxy:latest|$PROJECT_ROOT/src/terminal-proxy|$PROJECT_ROOT/src/terminal-proxy/Dockerfile"
+    "trinity-copilot:latest|$PROJECT_ROOT|$PROJECT_ROOT/src/copilot/Dockerfile"
+    "trinity-lightrag:latest|$PROJECT_ROOT/src/lightrag|$PROJECT_ROOT/src/lightrag/Dockerfile"
+    "trinity-frontend:latest|$PROJECT_ROOT/src/frontend|$PROJECT_ROOT/src/frontend/Dockerfile"
     "trinity-site:latest|$PROJECT_ROOT/site|$PROJECT_ROOT/site/Dockerfile"
   )
 
@@ -174,9 +174,9 @@ build_images() {
     ok "Built $img"
   done
 
-  if [ -f "$PROJECT_ROOT/app/Dockerfile.openclaw" ]; then
+  if [ -f "$PROJECT_ROOT/src/Dockerfile.openclaw" ]; then
     info "Building openclaw:trinity..."
-    docker build -t "openclaw:trinity" -f "$PROJECT_ROOT/app/Dockerfile.openclaw" "$PROJECT_ROOT/app" || {
+    docker build -t "openclaw:trinity" -f "$PROJECT_ROOT/src/Dockerfile.openclaw" "$PROJECT_ROOT/src" || {
       warn "Failed to build openclaw:trinity -- skipping"
     }
     ok "Built openclaw:trinity"
@@ -237,7 +237,7 @@ fix_ingress() {
 }
 
 run_migrations() {
-  local migrations_dir="$PROJECT_ROOT/app/supabase/migrations"
+  local migrations_dir="$PROJECT_ROOT/src/supabase/migrations"
   local db_password
   local output
   db_password="$(read_secret_value trinity-secrets SUPABASE_POSTGRES_PASSWORD "$DEFAULT_DB_PASSWORD")"

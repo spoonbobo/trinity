@@ -197,7 +197,10 @@ spec:
             - name: SUPERADMIN_EMAIL
               value: {{ .Values.superadmin.email | default "admin@trinity.work" | quote }}
             - name: SUPERADMIN_PASSWORD
-              value: {{ .Values.superadmin.password | default "admin123" | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: trinity-superadmin
+                  key: DEFAULT_SUPERADMIN_PASSWORD
           volumeMounts:
             - name: migrations
               mountPath: /migrations/rbac

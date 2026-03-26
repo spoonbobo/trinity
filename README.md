@@ -18,10 +18,10 @@
 ### 1. Configure environment
 
 ```bash
-cp app/.env.example app/.env
+cp src/.env.example src/.env
 ```
 
-Edit `app/.env` and set **at minimum** these secrets (generate each with `openssl rand -hex 32`):
+Edit `src/.env` and set **at minimum** these secrets (generate each with `openssl rand -hex 32`):
 
 | Variable | Required | Notes |
 |----------|----------|-------|
@@ -35,13 +35,13 @@ Edit `app/.env` and set **at minimum** these secrets (generate each with `openss
 | `VAULT_TOKEN` | yes | Vault dev-mode root token |
 | `BRAVE_API_KEY` | no | Enables `web_search` tool |
 
-See `app/.env.example` for the full list including optional integrations (LightRAG, Copilot, YouTube, Polymarket, etc.).
+See `src/.env.example` for the full list including optional integrations (LightRAG, Copilot, YouTube, Polymarket, etc.).
 
 ### 2. Build the frontend
 
 ```bash
-docker compose -f app/docker-compose.yml --profile build build --no-cache frontend-builder
-docker compose -f app/docker-compose.yml --profile build run --rm frontend-builder
+docker compose -f src/docker-compose.yml --profile build build --no-cache frontend-builder
+docker compose -f src/docker-compose.yml --profile build run --rm frontend-builder
 ```
 
 This compiles the Flutter web app and copies the static files into a shared Docker volume.
@@ -49,7 +49,7 @@ This compiles the Flutter web app and copies the static files into a shared Dock
 ### 3. Start the stack
 
 ```bash
-docker compose -f app/docker-compose.yml up -d
+docker compose -f src/docker-compose.yml up -d
 ```
 
 ### 4. Open the app
@@ -81,16 +81,16 @@ Add your LLM provider API keys in the OpenClaw dashboard.
 
 ```bash
 # Frontend (Dart/Flutter)
-docker compose -f app/docker-compose.yml --profile build build --no-cache frontend-builder
-docker compose -f app/docker-compose.yml --profile build run --rm frontend-builder
-docker compose -f app/docker-compose.yml restart nginx
+docker compose -f src/docker-compose.yml --profile build build --no-cache frontend-builder
+docker compose -f src/docker-compose.yml --profile build run --rm frontend-builder
+docker compose -f src/docker-compose.yml restart nginx
 
 # Backend services (JS/TS)
-docker compose -f app/docker-compose.yml build --no-cache auth-service terminal-proxy
-docker compose -f app/docker-compose.yml up -d auth-service terminal-proxy
+docker compose -f src/docker-compose.yml build --no-cache auth-service terminal-proxy
+docker compose -f src/docker-compose.yml up -d auth-service terminal-proxy
 
 # AGENTS.md or extension changes (no rebuild needed)
-docker cp app/AGENTS.md trinity-openclaw:/home/node/.openclaw/workspace/AGENTS.md
+docker cp src/AGENTS.md trinity-openclaw:/home/node/.openclaw/workspace/AGENTS.md
 docker restart trinity-openclaw
 ```
 
@@ -155,7 +155,7 @@ After changing Flutter source code:
 
 ```bash
 eval $(minikube docker-env)
-docker build --no-cache -t trinity-frontend:latest app/frontend/
+docker build --no-cache -t trinity-frontend:latest src/frontend/
 kubectl rollout restart deployment/nginx -n trinity
 ```
 

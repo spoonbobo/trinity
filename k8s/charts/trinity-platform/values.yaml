@@ -15,7 +15,7 @@ secrets:
   keycloakAdminPassword: ""
   keycloakClientSecret: ""
   grafanaPassword: ""
-  vaultToken: "root"
+  vaultToken: ""
   zenApiKey: ""
   delegationJwtSecret: ""
   lightragInternalToken: ""
@@ -58,7 +58,7 @@ supabaseDb:
 # ─── Vault ─────────────────────────────────────────────────────────────────
 vault:
   image: hashicorp/vault:1.15
-  devMode: true
+  devMode: false
   uiEnabled: false
   storage: 1Gi
   # Vault Agent Injector: when enabled, pods receive Vault sidecar annotations.

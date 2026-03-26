@@ -14,8 +14,8 @@ data:
         "mode": "local",
         "bind": "lan",
         "controlUi": {
-          "dangerouslyAllowHostHeaderOriginFallback": true,
-          "dangerouslyDisableDeviceAuth": true
+          "dangerouslyAllowHostHeaderOriginFallback": false,
+          "dangerouslyDisableDeviceAuth": false
         },
         "auth": {
           "mode": "token"
@@ -25,7 +25,7 @@ data:
         "defaults": {
           "workspace": "/home/node/.openclaw/workspace",
           "sandbox": {
-            "mode": "off",
+            "mode": "on",
             "scope": "agent"
           }
         }

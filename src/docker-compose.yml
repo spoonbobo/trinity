@@ -1,0 +1,505 @@
+services:
+  # ─── Supabase Postgres ────────────────────────────────────────────────
+  supabase-db:
+    image: supabase/postgres:15.8.1.127
+    container_name: trinity-supabase-db
+    restart: unless-stopped
+    # Port NOT exposed to host -- only accessible within Docker network
+    # Use `docker exec -it trinity-supabase-db psql -U postgres` for direct access
+    volumes:
+      - supabase-db-data:/var/lib/postgresql/data
+      - ./supabase/migrations:/docker-entrypoint-initdb.d/rbac:ro
+    environment:
+      POSTGRES_PASSWORD: ${SUPABASE_POSTGRES_PASSWORD:?Set SUPABASE_POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: supabase
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    networks:
+      - trinity
+
+  # ─── HashiCorp Vault ────────────────────────────────────────────────────────
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: trinity-vault
+    restart: unless-stopped
+    # Port NOT exposed to host -- only accessible within Docker network
+    environment:
+      VAULT_ADDR: http://0.0.0.0:8200
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_UI: "false"
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - trinity
+
+  # ─── Vault Init ───────────────────────────────────────────────────────────
+  vault-init:
+    image: hashicorp/vault:1.15
+    container_name: trinity-vault-init
+    restart: "no"
+    depends_on:
+      vault:
+        condition: service_healthy
+    volumes:
+      - vault-data:/vault/data
+      - ./vault/scripts:/vault/scripts:ro
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: root
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:?Set SUPABASE_JWT_SECRET in .env}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?Set SUPABASE_ANON_KEY in .env}
+      SUPABASE_POSTGRES_PASSWORD: ${SUPABASE_POSTGRES_PASSWORD:?Set SUPABASE_POSTGRES_PASSWORD in .env}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?Set OPENCLAW_GATEWAY_TOKEN in .env}
+      SUPERADMIN_ALLOWLIST: ${SUPERADMIN_ALLOWLIST:-}
+      ENABLE_DEFAULT_SUPERADMIN: ${ENABLE_DEFAULT_SUPERADMIN:-true}
+    entrypoint: ["/bin/sh", "/vault/scripts/init.sh"]
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    networks:
+      - trinity
+
+  # ─── Grafana Loki ────────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.4.2
+    container_name: trinity-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml -validation.allow-structured-metadata=false
+    # Port NOT exposed to host
+    volumes:
+      - ./loki/config.yml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3100/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - trinity
+
+  # ─── Grafana ───────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.5.2
+    container_name: trinity-grafana
+    restart: unless-stopped
+    # Port NOT exposed to host -- access via nginx reverse proxy or `docker exec`
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    depends_on:
+      - loki
+    networks:
+      - trinity
+
+  # ─── Fluentd ───────────────────────────────────────────────────────────────
+  fluentd:
+    image: fluent/fluentd:v1.16-1
+    container_name: trinity-fluentd
+    restart: unless-stopped
+    # Port NOT exposed to host -- only internal services send logs
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    volumes:
+      - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf:ro
+    networks:
+      - trinity
+
+  # ─── Supabase GoTrue (Auth) ───────────────────────────────────────────
+  supabase-auth:
+    image: supabase/gotrue:v2.170.0
+    container_name: trinity-supabase-auth
+    restart: unless-stopped
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL:-http://localhost}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${SUPABASE_POSTGRES_PASSWORD:?Set SUPABASE_POSTGRES_PASSWORD in .env}@supabase-db:5432/supabase?sslmode=disable
+      GOTRUE_SITE_URL: ${SITE_URL:-http://localhost}
+      GOTRUE_URI_ALLOW_LIST: ""
+      GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET:?Set SUPABASE_JWT_SECRET in .env}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_SMS_AUTOCONFIRM: "true"
+      # Keycloak OIDC
+      GOTRUE_EXTERNAL_KEYCLOAK_ENABLED: "true"
+      GOTRUE_EXTERNAL_KEYCLOAK_CLIENT_ID: trinity-shell
+      GOTRUE_EXTERNAL_KEYCLOAK_SECRET: ${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
+      GOTRUE_EXTERNAL_KEYCLOAK_URL: http://keycloak:8080/realms/trinity
+      GOTRUE_EXTERNAL_KEYCLOAK_REDIRECT_URI: ${API_EXTERNAL_URL:-http://localhost}/supabase/auth/v1/callback
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9999/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - trinity
+
+  # ─── Keycloak (LDAP/AD federation + OIDC) ─────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1
+    container_name: trinity-keycloak
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_HEALTH_ENABLED: "true"
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      AUTHENTIK_ENABLED: ${AUTHENTIK_ENABLED:-false}
+      AUTHENTIK_ISSUER_URL: ${AUTHENTIK_ISSUER_URL:-}
+      AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID:-}
+      AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:-}
+      AUTHENTIK_SCOPES: ${AUTHENTIK_SCOPES:-openid profile email groups}
+      AUTHENTIK_GROUPS_MAPPER_ENABLED: ${AUTHENTIK_GROUPS_MAPPER_ENABLED:-true}
+      AUTHENTIK_DEFAULT_GROUP_VALUE: ${AUTHENTIK_DEFAULT_GROUP_VALUE:-trinity_user}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://supabase-db:5432/supabase
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: ${SUPABASE_POSTGRES_PASSWORD:?Set SUPABASE_POSTGRES_PASSWORD in .env}
+      KC_DB_SCHEMA: keycloak
+      KC_HTTP_RELATIVE_PATH: /keycloak
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/trinity-realm.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /keycloak/health/ready HTTP/1.1\r\nHost: localhost\r\n\r\n' >&3 && cat <&3 | grep -q '200'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    networks:
+      - trinity
+
+  keycloak-idp-bootstrap:
+    image: quay.io/keycloak/keycloak:26.1
+    container_name: trinity-keycloak-idp-bootstrap
+    restart: "no"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    environment:
+      KEYCLOAK_SERVER_URL: http://keycloak:8080/keycloak
+      KEYCLOAK_REALM: trinity
+      KEYCLOAK_ADMIN_REALM: master
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      AUTHENTIK_ENABLED: ${AUTHENTIK_ENABLED:-false}
+      AUTHENTIK_ISSUER_URL: ${AUTHENTIK_ISSUER_URL:-}
+      AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID:-}
+      AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:-}
+      AUTHENTIK_SCOPES: ${AUTHENTIK_SCOPES:-openid profile email groups}
+      AUTHENTIK_GROUPS_MAPPER_ENABLED: ${AUTHENTIK_GROUPS_MAPPER_ENABLED:-true}
+      AUTHENTIK_DEFAULT_GROUP_VALUE: ${AUTHENTIK_DEFAULT_GROUP_VALUE:-trinity_user}
+    volumes:
+      - ./keycloak/configure-authentik-idp.sh:/opt/keycloak/bin/configure-authentik-idp.sh:ro
+    entrypoint: ["/bin/sh", "/opt/keycloak/bin/configure-authentik-idp.sh"]
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - trinity
+
+  # ─── Auth Service (JWT verify + RBAC resolution) ───────────────────────
+  auth-service:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    container_name: trinity-auth-service
+    restart: unless-stopped
+    environment:
+      AUTH_SERVICE_PORT: 18791
+      JWT_SECRET: ${SUPABASE_JWT_SECRET:?Set SUPABASE_JWT_SECRET in .env}
+      SUPABASE_AUTH_URL: http://supabase-auth:9999
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?Set SUPABASE_ANON_KEY in .env}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost}
+      ENABLE_DEFAULT_SUPERADMIN: ${ENABLE_DEFAULT_SUPERADMIN:-false}
+      DEFAULT_SUPERADMIN_EMAIL: ${DEFAULT_SUPERADMIN_EMAIL:-admin@trinity.work}
+      DEFAULT_SUPERADMIN_PASSWORD: ${DEFAULT_SUPERADMIN_PASSWORD:?Set DEFAULT_SUPERADMIN_PASSWORD in .env}
+      POSTGRES_HOST: supabase-db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: supabase
+      POSTGRES_USER: ${POSTGRES_USER:-supabase_admin}
+      POSTGRES_PASSWORD: ${SUPABASE_POSTGRES_PASSWORD:?Set SUPABASE_POSTGRES_PASSWORD in .env}
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+      SUPERADMIN_ALLOWLIST: ${SUPERADMIN_ALLOWLIST:-}
+      LIGHTRAG_URL: http://lightrag:18803
+      LIGHTRAG_INTERNAL_TOKEN: ${LIGHTRAG_INTERNAL_TOKEN:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:18791/auth/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    networks:
+      - trinity
+
+  # ─── OpenClaw Gateway ──────────────────────────────────────────────────
+  openclaw-gateway:
+    image: openclaw:trinity
+    build:
+      context: .
+      dockerfile: Dockerfile.openclaw
+    container_name: trinity-openclaw
+    restart: unless-stopped
+    command: ["openclaw", "gateway", "--port", "18789", "--bind", "lan", "--allow-unconfigured"]
+    shm_size: '2gb'
+    volumes:
+      - openclaw-data:/home/node/.openclaw
+    environment:
+      - NODE_ENV=production
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      - POE_API_KEY=${POE_API_KEY:-}
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
+      - POLYMARKET_API_KEY=${POLYMARKET_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "openclaw", "health", "--token", "${OPENCLAW_GATEWAY_TOKEN}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    networks:
+      - trinity
+
+  # ─── Docker Socket Proxy (whitelists only EXEC for terminal-proxy) ────
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3
+    container_name: trinity-docker-socket-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      EXEC: 1
+      POST: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy:
+      resources:
+        limits:
+          memory: 32M
+    networks:
+      - trinity
+
+  # ─── Terminal Proxy ────────────────────────────────────────────────────
+  terminal-proxy:
+    build:
+      context: ./terminal-proxy
+      dockerfile: Dockerfile
+    container_name: trinity-terminal-proxy
+    restart: unless-stopped
+    environment:
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - OPENCLAW_CONTAINER_NAME=trinity-openclaw
+      - TERMINAL_PROXY_PORT=18790
+      - JWT_SECRET=${SUPABASE_JWT_SECRET:?Set SUPABASE_JWT_SECRET in .env}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost}
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:18790/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    volumes:
+      - terminal-proxy-data:/app/data
+    depends_on:
+      openclaw-gateway:
+        condition: service_healthy
+      docker-socket-proxy:
+        condition: service_started
+    networks:
+      - trinity
+
+  # ─── Copilot Service ─────────────────────────────────────────────────────
+  copilot:
+    build:
+      context: ..
+      dockerfile: src/copilot/Dockerfile
+    container_name: trinity-copilot
+    restart: unless-stopped
+    environment:
+      COPILOT_PORT: 18802
+      OPENCODE_PORT: 4096
+      COPILOT_DEFAULT_MODEL: ${COPILOT_DEFAULT_MODEL:-moonshotai/kimi-k2.5}
+      AUTH_SERVICE_URL: http://auth-service:18791
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost}
+      ZEN_API_KEY: ${ZEN_API_KEY:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:18802/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      auth-service:
+        condition: service_healthy
+    networks:
+      - trinity
+
+  # ─── LightRAG Sidecar ──────────────────────────────────────────────────────
+  lightrag:
+    build:
+      context: ./lightrag
+      dockerfile: Dockerfile
+    container_name: trinity-lightrag
+    restart: unless-stopped
+    environment:
+      LIGHTRAG_PORT: 18803
+      LIGHTRAG_DATA_DIR: /data
+      LIGHTRAG_INTERNAL_TOKEN: ${LIGHTRAG_INTERNAL_TOKEN:-}
+      LIGHTRAG_LLM_MODEL: ${LIGHTRAG_LLM_MODEL:-gpt-4o-mini}
+      LIGHTRAG_LLM_API_KEY: ${LIGHTRAG_LLM_API_KEY:-}
+      LIGHTRAG_LLM_BASE_URL: ${LIGHTRAG_LLM_BASE_URL:-}
+      LIGHTRAG_EMBEDDING_MODEL: ${LIGHTRAG_EMBEDDING_MODEL:-text-embedding-3-large}
+      LIGHTRAG_EMBEDDING_API_KEY: ${LIGHTRAG_EMBEDDING_API_KEY:-}
+      LIGHTRAG_EMBEDDING_BASE_URL: ${LIGHTRAG_EMBEDDING_BASE_URL:-}
+      LIGHTRAG_EMBEDDING_DIM: ${LIGHTRAG_EMBEDDING_DIM:-3072}
+      LIGHTRAG_EMBEDDING_MAX_TOKENS: ${LIGHTRAG_EMBEDDING_MAX_TOKENS:-8192}
+      LIGHTRAG_DEFAULT_QUERY_MODE: ${LIGHTRAG_DEFAULT_QUERY_MODE:-hybrid}
+      LIGHTRAG_ENABLE_RERANK: ${LIGHTRAG_ENABLE_RERANK:-true}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+    volumes:
+      - lightrag-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:18803/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      auth-service:
+        condition: service_healthy
+    networks:
+      - trinity
+
+  # ─── Frontend Builder (profile: build) ─────────────────────────────────
+  frontend-builder:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        GATEWAY_WS_URL: ${GATEWAY_WS_URL:-}
+        TERMINAL_WS_URL: ${TERMINAL_WS_URL:-}
+        AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-}
+        SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?Set SUPABASE_ANON_KEY in .env}
+    container_name: trinity-flutter-builder
+    volumes:
+      - flutter-build:/output
+    profiles:
+      - build
+
+  # ─── nginx ─────────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: trinity-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - flutter-build:/usr/share/nginx/html:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - openclaw-data:/openclaw-data:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/auth/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    depends_on:
+      openclaw-gateway:
+        condition: service_healthy
+      terminal-proxy:
+        condition: service_started
+      copilot:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      supabase-auth:
+        condition: service_healthy
+      keycloak-idp-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - trinity
+
+volumes:
+  openclaw-data:
+  flutter-build:
+  supabase-db-data:
+  vault-data:
+  grafana-data:
+  loki-data:
+  terminal-proxy-data:
+  lightrag-data:
+
+networks:
+  trinity:
+    driver: bridge

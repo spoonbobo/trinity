@@ -14,8 +14,8 @@ data:
         "mode": "local",
         "bind": "lan",
         "controlUi": {
-          "dangerouslyAllowHostHeaderOriginFallback": true,
-          "dangerouslyDisableDeviceAuth": true
+          "dangerouslyAllowHostHeaderOriginFallback": false,
+          "dangerouslyDisableDeviceAuth": false
         },
         "auth": {
           "mode": "token"
@@ -25,7 +25,7 @@ data:
         "defaults": {
           "workspace": "/home/node/.openclaw/workspace",
           "sandbox": {
-            "mode": "off",
+            "mode": "on",
             "scope": "agent"
           }
         }
@@ -98,6 +98,16 @@ data:
 
         upstream keycloak_server {
             server keycloak:8080;
+        }
+
+        map $http_origin $cors_origin {
+            default "";
+            "~^https?://localhost(:[0-9]+)?$" $http_origin;
+            {{- if .Values.urls.allowedOrigins }}
+            {{- range splitList "," .Values.urls.allowedOrigins }}
+            "{{ . | trim }}" "{{ . | trim }}";
+            {{- end }}
+            {{- end }}
         }
 
         server {
@@ -194,7 +204,7 @@ data:
                 proxy_hide_header Access-Control-Allow-Credentials;
                 proxy_hide_header Access-Control-Expose-Headers;
 
-                add_header Access-Control-Allow-Origin $http_origin always;
+                add_header Access-Control-Allow-Origin $cors_origin always;
                 add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, PATCH, OPTIONS" always;
                 add_header Access-Control-Allow-Headers "Authorization, apikey, x-client-info, Content-Type, Accept, Range" always;
                 add_header Access-Control-Allow-Credentials "true" always;
